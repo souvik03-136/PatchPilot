@@ -1,7 +1,7 @@
 ### Frontend Brief: PATCHPILOT AI Dashboard
 
 #### Overview
-The CodeSentinel AI frontend is a Streamlit-based dashboard that provides real-time monitoring and management of code quality and security analysis. It connects to a backend API to fetch data, perform analyses, and manage system configurations. The interface features a modern, responsive design with custom styling and intuitive navigation.
+The PatchPilot AI frontend is a Streamlit-based dashboard that provides real-time monitoring and management of code quality and security analysis. It connects to a backend API to fetch data, perform analyses, and manage system configurations. The interface features a modern, responsive design with custom styling and intuitive navigation.
 
 #### Key Features
 1. **Dashboard**: System metrics, agent status, and repository overview

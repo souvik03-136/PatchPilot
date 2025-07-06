@@ -1,0 +1,28 @@
+version: '3.8'
+
+services:
+  frontend:
+    build: ./frontend
+    container_name: patchpilot-frontend
+    ports:
+      - "8501:8501"
+    environment:
+      - BACKEND_URL=http://backend:8000
+    volumes:
+      - ./frontend:/app
+    depends_on:
+      - backend
+    networks:
+      - sentinel-net
+
+  backend:
+    image: your-backend-image:latest  # Replace with your backend image
+    container_name: patchpilot-backend
+    ports:
+      - "8000:8000"
+    networks:
+      - sentinel-net
+
+networks:
+  sentinel-net:
+    driver: bridge
