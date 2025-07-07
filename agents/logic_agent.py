@@ -1,0 +1,76 @@
+from langchain_core.prompts import ChatPromptTemplate
+from .models import AgentResponse
+from .tools import get_llm, parse_code_blocks
+
+class LogicAgent:
+    def __init__(self, provider: str = "gemini"):
+        self.llm_provider = FreeLLMProvider(provider)
+        self.llm = self.llm_provider.get_llm("logic")
+        self.parser = StrOutputParser()
+        
+        self.prompt = ChatPromptTemplate.from_messages([
+            ("user", """You are a logic analysis expert. Analyze this code for logical issues:
+
+File: {file_path}
+Code:
+{code}
+
+Look for:
+1. Potential bugs and logical errors
+2. Race conditions
+3. Memory leaks
+4. Null pointer exceptions
+5. Infinite loops
+6. Data flow issues
+7. API contract violations
+8. Edge case handling
+
+Provide analysis in this format:
+## Logic Analysis for {file_path}
+
+### Issues Found:
+1. **Issue Type**: Description
+   - Line: X
+   - Severity: Low/Medium/High
+   - Fix: Suggested solution
+
+### Suggestions:
+- Suggestion 1
+- Suggestion 2
+
+If no issues found, state: "No logic issues detected."
+
+Response:""")
+        ])
+
+    def analyze(self, code_snippets: list) -> AgentResponse:
+        results = []
+        errors = []
+        
+        for snippet in code_snippets:
+            try:
+                chain = self.prompt | self.llm | self.parser
+                analysis = chain.invoke({
+                    "file_path": snippet.file_path,
+                    "code": snippet.content
+                })
+                
+                # Extract code blocks if any
+                code_blocks = parse_code_blocks(analysis)
+                
+                results.append({
+                    "file": snippet.file_path,
+                    "analysis": analysis,
+                    "suggestions": code_blocks,
+                    "has_issues": "no logic issues detected" not in analysis.lower()
+                })
+                
+            except Exception as e:
+                errors.append(f"Error analyzing {snippet.file_path}: {str(e)}")
+        
+        return AgentResponse(
+            success=len(errors) == 0,
+            results=results,
+            errors=errors,
+            metadata={"total_files": len(code_snippets), "analyses_completed": len(results)}
+        )
