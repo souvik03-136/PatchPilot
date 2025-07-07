@@ -1,11 +1,15 @@
-from .models import QualityIssue, AgentResponse
+import json
+from langchain_core.output_parsers import StrOutputParser
+from langchain_core.prompts import ChatPromptTemplate
 
+from .models import QualityIssue, AgentResponse
+from .tools import FreeLLMProvider  # ✅ required for instantiating the LLM provider
 class QualityAgent:
     def __init__(self, provider: str = "gemini"):
         self.llm_provider = FreeLLMProvider(provider)
         self.llm = self.llm_provider.get_llm("quality")
         self.parser = StrOutputParser()
-        
+
         self.prompt = ChatPromptTemplate.from_messages([
             ("user", """You are a code quality expert. Review this code for quality issues:
 
@@ -42,7 +46,7 @@ Response (JSON only):""")
     def analyze(self, code_snippets: list) -> AgentResponse:
         results = []
         errors = []
-        
+
         for snippet in code_snippets:
             try:
                 chain = self.prompt | self.llm | self.parser
@@ -50,7 +54,7 @@ Response (JSON only):""")
                     "file_path": snippet.file_path,
                     "code": snippet.content
                 })
-                
+
                 # Parse JSON response
                 try:
                     clean_response = response.strip()
@@ -58,9 +62,9 @@ Response (JSON only):""")
                         clean_response = clean_response[7:]
                     if clean_response.endswith("```"):
                         clean_response = clean_response[:-3]
-                    
+
                     analysis = json.loads(clean_response.strip())
-                    
+
                     for item in analysis:
                         if isinstance(item, dict):
                             issue = QualityIssue(
@@ -72,7 +76,7 @@ Response (JSON only):""")
                                 rule_id=item.get("rule_id")
                             )
                             results.append(issue)
-                            
+
                 except json.JSONDecodeError:
                     # Fallback for non-JSON responses
                     if any(word in response.lower() for word in ["style", "complexity", "documentation", "error"]):
@@ -84,10 +88,10 @@ Response (JSON only):""")
                             severity="low"
                         )
                         results.append(issue)
-                    
+
             except Exception as e:
                 errors.append(f"Error analyzing {snippet.file_path}: {str(e)}")
-        
+
         return AgentResponse(
             success=len(errors) == 0,
             results=results,

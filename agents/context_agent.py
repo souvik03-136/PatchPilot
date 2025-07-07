@@ -4,8 +4,8 @@ from .models import AnalysisContext, AgentResponse
 from .tools import get_llm, hash_content
 
 class ContextAgent:
-    def __init__(self, model: str = "codellama:13b"):
-        self.llm = get_llm(model)
+    def __init__(self, provider: str = "gemini"):
+        self.llm = get_llm("context", provider)  # ✅ Fixed this line
         self.memory = ConversationBufferMemory()
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a context manager. Your tasks:
@@ -22,36 +22,30 @@ class ContextAgent:
             
             Previous issues: {previous_issues}
             
-            Respond with enriched context in JSON format."""),
+            Respond with enriched context in JSON format."""),  # 👈 your prompt
             ("human", "Enrich analysis context with historical data")
         ])
 
     def enrich_context(self, context: AnalysisContext) -> AgentResponse:
         try:
-            # Create memory key for this author/repo
             memory_key = f"{context.repo_name}:{hash_content(context.author)}"
-            
-            # Retrieve historical context
             history = self.memory.load_memory_variables({}).get(memory_key, "")
-            
-            # Prepare prompt
+
             prompt = self.prompt.format(
                 repo_name=context.repo_name,
                 pr_id=context.pr_id,
                 author=context.author,
-                previous_issues=str(context.previous_issues[:3]),  # Show recent issues
+                previous_issues=str(context.previous_issues[:3]),
                 history=history
             )
-            
-            # Get enriched context
+
             response = self.llm.invoke(prompt)
-            
-            # Update memory
+
             self.memory.save_context(
                 {"input": prompt},
                 {"output": response}
             )
-            
+
             return AgentResponse(
                 success=True,
                 results=[response],

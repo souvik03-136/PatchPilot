@@ -78,3 +78,7 @@ def filter_high_severity(issues: list, min_severity="medium") -> list:
     severity_levels = {"critical": 4, "high": 3, "medium": 2, "low": 1}
     min_level = severity_levels.get(min_severity, 2)
     return [issue for issue in issues if severity_levels.get(getattr(issue, 'severity', 'low'), 0) >= min_level]
+
+
+def get_llm(agent_type: str, provider: str = "gemini", temperature: float = 0.2):
+    return FreeLLMProvider(provider).get_llm(agent_type, temperature=temperature)

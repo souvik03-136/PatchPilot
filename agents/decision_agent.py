@@ -3,8 +3,8 @@ from .models import AgentResponse, Vulnerability, QualityIssue
 from .tools import get_llm, filter_high_severity
 
 class DecisionAgent:
-    def __init__(self, model: str = "codellama:34b"):
-        self.llm = get_llm(model)
+    def __init__(self, provider: str = "gemini"):  # ✅ Changed from model: str to provider: str
+        self.llm = get_llm("decision", provider)   # ✅ Correct usage of get_llm
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a decision agent. Your responsibilities:
             1. Risk assessment of PR
@@ -30,13 +30,13 @@ class DecisionAgent:
 
     def make_decision(self, state: dict) -> AgentResponse:
         try:
-            # Filter critical security issues
+            # Filter critical/high security issues
             critical_issues = filter_high_severity(
                 state.get("security_results", []), 
                 "high"
             )
             
-            # Prepare prompt
+            # Format prompt input
             prompt = self.prompt.format(
                 pr_id=state["context"].pr_id,
                 security_issues=str(state.get("security_results", [])[:3]),
@@ -45,7 +45,7 @@ class DecisionAgent:
                 context=str(state.get("enriched_context", {}))
             )
             
-            # Get decision
+            # Invoke LLM
             response = self.llm.invoke(prompt)
             
             return AgentResponse(

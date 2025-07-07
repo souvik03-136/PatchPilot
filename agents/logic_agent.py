@@ -1,6 +1,8 @@
 from langchain_core.prompts import ChatPromptTemplate
+from langchain_core.output_parsers import StrOutputParser
 from .models import AgentResponse
-from .tools import get_llm, parse_code_blocks
+from .tools import get_llm, parse_code_blocks, FreeLLMProvider  # ✅ Fixed import
+
 
 class LogicAgent:
     def __init__(self, provider: str = "gemini"):

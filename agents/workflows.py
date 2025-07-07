@@ -1,4 +1,4 @@
-from langgraph.graph import Graph
+from langgraph.pregel import Graph
 from langgraph.graph import END
 from .models import WorkflowState
 

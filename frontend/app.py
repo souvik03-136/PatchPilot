@@ -12,7 +12,7 @@ from pages import (
 
 # Page configuration
 st.set_page_config(
-    page_title="CodeSentinel AI - Dashboard",
+    page_title="PatchPilot AI - Dashboard",
     page_icon="🛡️",
     layout="wide",
     initial_sidebar_state="expanded"
