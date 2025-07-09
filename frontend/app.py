@@ -24,6 +24,12 @@ utils.apply_custom_styles()
 # Initialize session state
 utils.init_session_state()
 
+# Handle rerun trigger early
+if st.session_state.get("refresh_triggered"):
+    st.session_state.refresh_triggered = False  # Reset the flag
+    st.experimental_rerun()
+    st.stop()  # Prevent further execution in this run cycle
+
 # Render sidebar and get current page
 current_page = sidebar.render_sidebar()
 

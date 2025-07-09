@@ -7,7 +7,7 @@ def show():
     # Header
     st.markdown("""
         <div class="main-header">
-            <h1 style="color: white; margin: 0;">CodeSentinel AI Dashboard</h1>
+            <h1 style="color: white; margin: 0;">PatchPilot AI Dashboard</h1>
             <p style="color: white; margin: 10px 0 0 0;">Advanced Code Quality Guardian with AI Intelligence</p>
         </div>
     """, unsafe_allow_html=True)

@@ -43,6 +43,9 @@ def init_session_state():
         st.session_state.current_analysis = None
     if 'backend_url' not in st.session_state:
         st.session_state.backend_url = BACKEND_URL
+    if 'refresh_triggered' not in st.session_state:  # ✅ add this line
+        st.session_state.refresh_triggered = False
+
 
 def apply_custom_styles():
     """Inject custom CSS styles"""
