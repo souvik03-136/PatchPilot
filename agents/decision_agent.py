@@ -3,8 +3,8 @@ from .models import AgentResponse, Vulnerability, QualityIssue
 from .tools import get_llm, filter_high_severity
 
 class DecisionAgent:
-    def __init__(self, provider: str = "gemini"):  # ✅ Changed from model: str to provider: str
-        self.llm = get_llm("decision", provider)   # ✅ Correct usage of get_llm
+    def __init__(self, provider: str = "gemini"):  #  Changed from model: str to provider: str
+        self.llm = get_llm("decision", provider)   #  Correct usage of get_llm
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a decision agent. Your responsibilities:
             1. Risk assessment of PR

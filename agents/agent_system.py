@@ -8,12 +8,7 @@ from .decision_agent import DecisionAgent
 
 class AgentSystem:
     def __init__(self, provider: str = "gemini"):
-        """
-        Initialize agent system with free LLM provider
-        
-        Args:
-            provider: "gemini" (free), "groq" (free), or "huggingface" (free)
-        """
+
         self.provider = provider
         self.agents = {
             "security": SecurityAgent(provider),
@@ -26,7 +21,6 @@ class AgentSystem:
         # self.workflow = create_analysis_workflow(self.agents)
     
     def analyze_pull_request(self, context: AnalysisContext):
-        """Main entry point for PR analysis using free LLMs"""
         
         # Simple sequential analysis (can be made parallel later)
         results = {

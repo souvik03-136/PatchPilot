@@ -5,7 +5,7 @@ from .tools import get_llm, hash_content
 
 class ContextAgent:
     def __init__(self, provider: str = "gemini"):
-        self.llm = get_llm("context", provider)  # ✅ Fixed this line
+        self.llm = get_llm("context", provider)  #  Fixed this line
         self.memory = ConversationBufferMemory()
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a context manager. Your tasks:
@@ -22,7 +22,7 @@ class ContextAgent:
             
             Previous issues: {previous_issues}
             
-            Respond with enriched context in JSON format."""),  # 👈 your prompt
+            Respond with enriched context in JSON format."""),  #  your prompt
             ("human", "Enrich analysis context with historical data")
         ])
 
