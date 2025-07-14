@@ -1,44 +1,64 @@
-from langgraph.pregel import Graph
-from langgraph.graph import END
+from langgraph.graph import StateGraph, END, START
 from .models import WorkflowState
 
+
+def route_based_on_severity(state: WorkflowState) -> str:
+    """Route to decision making if critical issues found, otherwise enrich context"""
+    critical = any(issue.severity == "critical" for issue in state.security_results)
+    return "make_decision" if critical else "enrich_context"
+
+
 def create_analysis_workflow(agents: dict):
-    workflow = Graph()
+    """Create the analysis workflow with parallel execution"""
     
-    # Define nodes
-    workflow.add_node("security_analysis", agents["security"].analyze)
-    workflow.add_node("quality_analysis", agents["quality"].analyze)
-    workflow.add_node("logic_analysis", agents["logic"].analyze)
-    workflow.add_node("enrich_context", agents["context"].enrich_context)
-    workflow.add_node("make_decision", agents["decision"].make_decision)
+    # 🛠️ Initialize workflow graph
+    builder = StateGraph(WorkflowState)
+
+    # ⏱️ Nodes for parallel analysis
+    builder.add_node("security_analysis", agents["security"].analyze)
+    builder.add_node("quality_analysis", agents["quality"].analyze)
+    builder.add_node("logic_analysis", agents["logic"].analyze)
+
+    # 📥 Post-processing nodes
+    builder.add_node("enrich_context", agents["context"].enrich_context)
+    builder.add_node("make_decision", agents["decision"].make_decision)
+
+    # ▶️ Initial fan-out - start all analysis agents in parallel
+    builder.add_edge(START, "security_analysis")
+    builder.add_edge(START, "quality_analysis")
+    builder.add_edge(START, "logic_analysis")
+
+    # 🚦 Routing based on critical severity after all parallel nodes complete
+    builder.add_conditional_edges(
+        "security_analysis",
+        route_based_on_severity,
+        {
+            "enrich_context": "enrich_context",
+            "make_decision": "make_decision"
+        }
+    )
     
-    # Set entry points (run security, quality, logic in parallel)
-    workflow.set_entry_point("security_analysis")
-    workflow.set_entry_point("quality_analysis")
-    workflow.set_entry_point("logic_analysis")
+    # Wait for all parallel nodes to complete before routing
+    builder.add_conditional_edges(
+        "quality_analysis",
+        route_based_on_severity,
+        {
+            "enrich_context": "enrich_context",
+            "make_decision": "make_decision"
+        }
+    )
     
-    # After parallel analysis, enrich context
-    workflow.add_edge("security_analysis", "enrich_context")
-    workflow.add_edge("quality_analysis", "enrich_context")
-    workflow.add_edge("logic_analysis", "enrich_context")
-    
-    # Then make decision
-    workflow.add_edge("enrich_context", "make_decision")
-    workflow.add_edge("make_decision", END)
-    
-    # Handle state
-    def update_state(state: WorkflowState, node: str, result: dict):
-        if node == "security_analysis":
-            state.security_results = result.get("results", [])
-        elif node == "quality_analysis":
-            state.quality_results = result.get("results", [])
-        elif node == "logic_analysis":
-            state.logic_results = result.get("results", [])
-        elif node == "enrich_context":
-            state.enriched_context = result.get("results", [])[0] if result.get("results") else {}
-        elif node == "make_decision":
-            state.decision = result.get("results", [])[0] if result.get("results") else {}
-        return state
-    
-    # Compile workflow
-    return workflow.compile(update_state=update_state)
+    builder.add_conditional_edges(
+        "logic_analysis",
+        route_based_on_severity,
+        {
+            "enrich_context": "enrich_context",
+            "make_decision": "make_decision"
+        }
+    )
+
+    # ✅ Final steps
+    builder.add_edge("enrich_context", "make_decision")
+    builder.add_edge("make_decision", END)
+
+    return builder.compile()

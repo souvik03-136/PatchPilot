@@ -1,7 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from .models import AgentResponse
-from .tools import get_llm, parse_code_blocks, FreeLLMProvider  #  Fixed import
+from .tools import get_llm, parse_code_blocks, FreeLLMProvider
 
 
 class LogicAgent:
@@ -9,7 +9,7 @@ class LogicAgent:
         self.llm_provider = FreeLLMProvider(provider)
         self.llm = self.llm_provider.get_llm("logic")
         self.parser = StrOutputParser()
-        
+
         self.prompt = ChatPromptTemplate.from_messages([
             ("user", """You are a logic analysis expert. Analyze this code for logical issues:
 
@@ -45,34 +45,44 @@ If no issues found, state: "No logic issues detected."
 Response:""")
         ])
 
-    def analyze(self, code_snippets: list) -> AgentResponse:
+    def analyze(self, state) -> AgentResponse:
+        # ✅ Safely convert WorkflowState to dictionary
+        state_dict = dict(state)
+        code_snippets = state_dict.get("code_snippets", [])
+
         results = []
         errors = []
-        
+
         for snippet in code_snippets:
             try:
+                if isinstance(snippet, tuple):  # defensive unpack
+                    snippet = snippet[1]
+
                 chain = self.prompt | self.llm | self.parser
                 analysis = chain.invoke({
                     "file_path": snippet.file_path,
                     "code": snippet.content
                 })
-                
-                # Extract code blocks if any
+
                 code_blocks = parse_code_blocks(analysis)
-                
+
                 results.append({
                     "file": snippet.file_path,
                     "analysis": analysis,
                     "suggestions": code_blocks,
                     "has_issues": "no logic issues detected" not in analysis.lower()
                 })
-                
+
             except Exception as e:
-                errors.append(f"Error analyzing {snippet.file_path}: {str(e)}")
-        
+                file_path = getattr(snippet, "file_path", "unknown")
+                errors.append(f"Error analyzing {file_path}: {str(e)}")
+
         return AgentResponse(
             success=len(errors) == 0,
             results=results,
             errors=errors,
-            metadata={"total_files": len(code_snippets), "analyses_completed": len(results)}
+            metadata={
+                "total_files": len(code_snippets),
+                "analyses_completed": len(results)
+            }
         )

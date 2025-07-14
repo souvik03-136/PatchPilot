@@ -1,17 +1,15 @@
-# security_agent.py - Using Free LLMs
+import json
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from .models import Vulnerability, AgentResponse
 from .tools import FreeLLMProvider
-import json
 
 class SecurityAgent:
     def __init__(self, provider: str = "gemini"):
         self.llm_provider = FreeLLMProvider(provider)
         self.llm = self.llm_provider.get_llm("security")
         self.parser = StrOutputParser()
-        
-        # Simplified prompt for better free model performance
+
         self.prompt = ChatPromptTemplate.from_messages([
             ("user", """You are a security expert. Analyze this code for security vulnerabilities:
 
@@ -48,32 +46,33 @@ If no vulnerabilities found, return: []
 Response (JSON only):""")
         ])
 
-    def analyze(self, code_snippets: list) -> AgentResponse:
+    def analyze(self, state) -> AgentResponse:
+        # ✅ Convert WorkflowState to dict to safely extract code_snippets
+        state_dict = dict(state)
+        code_snippets = state_dict.get("code_snippets", [])
+
         results = []
         errors = []
-        
+
         for snippet in code_snippets:
             try:
-                # Create chain and invoke
+                if isinstance(snippet, tuple):
+                    snippet = snippet[1]
+
                 chain = self.prompt | self.llm | self.parser
                 response = chain.invoke({
                     "file_path": snippet.file_path,
                     "code": snippet.content
                 })
-                
-                # Parse JSON response
+
+                clean_response = response.strip()
+                if clean_response.startswith("```json"):
+                    clean_response = clean_response[7:]
+                if clean_response.endswith("```"):
+                    clean_response = clean_response[:-3]
+
                 try:
-                    # Clean response - remove markdown formatting
-                    clean_response = response.strip()
-                    if clean_response.startswith("```json"):
-                        clean_response = clean_response[7:]
-                    if clean_response.endswith("```"):
-                        clean_response = clean_response[:-3]
-                    
-                    # Parse JSON
                     analysis = json.loads(clean_response.strip())
-                    
-                    # Convert to Vulnerability objects
                     for item in analysis:
                         if isinstance(item, dict):
                             vulnerability = Vulnerability(
@@ -85,26 +84,27 @@ Response (JSON only):""")
                                 confidence=item.get("confidence", 0.8)
                             )
                             results.append(vulnerability)
-                            
                 except json.JSONDecodeError:
-                    # Fallback: extract basic info from text response
                     if "vulnerability" in response.lower() or "security" in response.lower():
-                        vulnerability = Vulnerability(
+                        results.append(Vulnerability(
                             type="Potential Security Issue",
                             severity="medium",
                             description=response[:200] + "..." if len(response) > 200 else response,
                             line=0,
                             file=snippet.file_path,
                             confidence=0.6
-                        )
-                        results.append(vulnerability)
-                    
+                        ))
+
             except Exception as e:
-                errors.append(f"Error analyzing {snippet.file_path}: {str(e)}")
-        
+                file_path = getattr(snippet, "file_path", "unknown")
+                errors.append(f"Error analyzing {file_path}: {str(e)}")
+
         return AgentResponse(
             success=len(errors) == 0,
             results=results,
             errors=errors,
-            metadata={"total_files": len(code_snippets), "issues_found": len(results)}
+            metadata={
+                "total_files": len(code_snippets),
+                "issues_found": len(results)
+            }
         )

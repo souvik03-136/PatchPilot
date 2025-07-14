@@ -3,7 +3,9 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
 from .models import QualityIssue, AgentResponse
-from .tools import FreeLLMProvider  # ✅ required for instantiating the LLM provider
+from .tools import FreeLLMProvider
+
+
 class QualityAgent:
     def __init__(self, provider: str = "gemini"):
         self.llm_provider = FreeLLMProvider(provider)
@@ -43,12 +45,20 @@ If no issues found, return: []
 Response (JSON only):""")
         ])
 
-    def analyze(self, code_snippets: list) -> AgentResponse:
+    def analyze(self, state) -> AgentResponse:
+        # ✅ Safely convert state to a dict
+        state_dict = dict(state)
+        code_snippets = state_dict.get("code_snippets", [])
+
         results = []
         errors = []
 
         for snippet in code_snippets:
             try:
+                # Defensive handling for tuple input like (index, snippet)
+                if isinstance(snippet, tuple):
+                    snippet = snippet[1]
+
                 chain = self.prompt | self.llm | self.parser
                 response = chain.invoke({
                     "file_path": snippet.file_path,
@@ -78,7 +88,6 @@ Response (JSON only):""")
                             results.append(issue)
 
                 except json.JSONDecodeError:
-                    # Fallback for non-JSON responses
                     if any(word in response.lower() for word in ["style", "complexity", "documentation", "error"]):
                         issue = QualityIssue(
                             type="Code Quality Issue",
@@ -90,11 +99,15 @@ Response (JSON only):""")
                         results.append(issue)
 
             except Exception as e:
-                errors.append(f"Error analyzing {snippet.file_path}: {str(e)}")
+                file_path = getattr(snippet, "file_path", "unknown")
+                errors.append(f"Error analyzing {file_path}: {str(e)}")
 
         return AgentResponse(
             success=len(errors) == 0,
             results=results,
             errors=errors,
-            metadata={"total_files": len(code_snippets), "issues_found": len(results)}
+            metadata={
+                "total_files": len(code_snippets),
+                "issues_found": len(results)
+            }
         )
