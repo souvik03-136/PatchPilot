@@ -1,5 +1,3 @@
-# agent_system.py
-
 import json
 import os
 from .workflows import create_analysis_workflow
@@ -20,7 +18,7 @@ class AgentSystem:
             "context": ContextAgent(provider),
             "decision": DecisionAgent(provider)
         }
-        # You can enable this to use workflow-based execution
+        # Uncomment to use workflow-based execution
         # self.workflow = create_analysis_workflow(self.agents)
 
     def analyze_pull_request(self, context: AnalysisContext):
@@ -104,9 +102,3 @@ class AgentSystem:
         except Exception as e:
             print(f"Feedback recording failed: {str(e)}")
             return False
-
-
-'''
-
-
-'''

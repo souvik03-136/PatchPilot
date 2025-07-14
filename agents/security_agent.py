@@ -4,6 +4,7 @@ from langchain_core.output_parsers import StrOutputParser
 from .models import Vulnerability, AgentResponse
 from .tools import FreeLLMProvider
 
+
 class SecurityAgent:
     def __init__(self, provider: str = "gemini"):
         self.llm_provider = FreeLLMProvider(provider)
@@ -31,14 +32,14 @@ Find these security issues:
 
 For each vulnerability found, respond with JSON format:
 [
-    {{
+    {
         "type": "vulnerability_type",
         "severity": "low/medium/high/critical",
         "description": "detailed description",
         "line": line_number,
         "file": "filename",
         "confidence": confidence_score
-    }}
+    }
 ]
 
 If no vulnerabilities found, return: []
@@ -47,7 +48,6 @@ Response (JSON only):""")
         ])
 
     def analyze(self, state) -> AgentResponse:
-        # ✅ Convert WorkflowState to dict to safely extract code_snippets
         state_dict = dict(state)
         code_snippets = state_dict.get("code_snippets", [])
 

@@ -11,22 +11,18 @@ class ContextAgent:
     def __init__(self, provider: str = "gemini"):
         self.llm = get_llm("context", provider)
 
-        # Load embedding model
         self.embedding = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
 
-        # Use Chroma as vector store (persistent local storage)
         self.vector_store = Chroma(
             collection_name="context_memory",
             embedding_function=self.embedding,
             persist_directory="memory_store"
         )
 
-        # Set up retriever-based memory
         self.memory = VectorStoreRetrieverMemory(
             retriever=self.vector_store.as_retriever(search_kwargs={"k": 3})
         )
 
-        # Prompt template for LLM
         self.prompt = ChatPromptTemplate.from_messages([
             ("system", """You are a context manager. Analyze historical data:
 
@@ -43,22 +39,15 @@ Current PR Context:
 Historical Context: {history}
 
 Adjust severity for recurring issues and identify patterns."""),
-
             ("human", "Enrich context for PR: {pr_id}")
         ])
 
     def enrich_context(self, context: AnalysisContext) -> AgentResponse:
         try:
-            # Create memory key
             memory_key = f"{context.repo_name}:{hash_content(context.author)}"
-
-            # Retrieve past memory
             history = self.memory.load_memory_variables({"prompt": memory_key})
-
-            # Analyze commit message patterns
             commit_patterns = self._analyze_commit_history(context.commit_history)
 
-            # Format prompt
             prompt = self.prompt.format(
                 repo_name=context.repo_name,
                 pr_id=context.pr_id,
@@ -69,10 +58,7 @@ Adjust severity for recurring issues and identify patterns."""),
                 history=history,
             )
 
-            # Run LLM
             response = self.llm.invoke(prompt)
-
-            # Store updated context
             self.memory.save_context({"input": memory_key}, {"output": response})
             self.vector_store.persist()
 
@@ -133,13 +119,3 @@ Adjust severity for recurring issues and identify patterns."""),
             ),
         }
         return "\n".join([f"{k}: {v} occurrences" for k, v in patterns.items()])
-
-
-'''
-This updated ContextAgent:
-
-Uses vector memory retrieval to learn from historical dev context.
-
-Enriches PR analysis with past patterns and commit insights.
-
-Stores and retrieves context to/from Chroma for scalable memory.'''

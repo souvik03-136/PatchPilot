@@ -1,30 +1,22 @@
 import os
 import sys
 import time
-
 from dotenv import load_dotenv
 
 # Add root to path so `agents` can be imported
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
 from agents.models import (
-    AnalysisContext, CodeSnippet, Vulnerability, QualityIssue, 
+    AnalysisContext, CodeSnippet, Vulnerability, QualityIssue,
     AgentResponse, WorkflowState
 )
 from agents.workflows import create_analysis_workflow
 
-# Load environment variables
 load_dotenv()
 
 
 class MockSecurityAgent:
-    """Mock security agent that simulates analysis without API calls"""
-    
     def analyze(self, state: WorkflowState) -> dict:
-        """Simulate security analysis"""
-        print("🔒 Mock Security Agent: Analyzing code...")
-        
-        # Simulate finding security issues
         vulnerabilities = []
         for snippet in state.context.code_snippets:
             if 'admin_pass' in snippet.content:
@@ -36,7 +28,6 @@ class MockSecurityAgent:
                     file=snippet.file_path,
                     confidence=0.95
                 ))
-            
             if 'eval(' in snippet.content:
                 vulnerabilities.append(Vulnerability(
                     type="Code Injection",
@@ -46,20 +37,13 @@ class MockSecurityAgent:
                     file=snippet.file_path,
                     confidence=0.9
                 ))
-        
         return {"security_results": vulnerabilities}
 
 
 class MockQualityAgent:
-    """Mock quality agent that simulates analysis without API calls"""
-    
     def analyze(self, state: WorkflowState) -> dict:
-        """Simulate quality analysis"""
-        print("📊 Mock Quality Agent: Analyzing code quality...")
-        
         quality_issues = []
         for snippet in state.context.code_snippets:
-            # Simulate finding quality issues
             if len(snippet.content.split('\n')) > 10:
                 quality_issues.append(QualityIssue(
                     type="Function Length",
@@ -69,7 +53,6 @@ class MockQualityAgent:
                     severity="medium",
                     rule_id="C901"
                 ))
-            
             if 'for item in data:' in snippet.content:
                 quality_issues.append(QualityIssue(
                     type="Code Complexity",
@@ -79,17 +62,11 @@ class MockQualityAgent:
                     severity="low",
                     rule_id="C903"
                 ))
-        
         return {"quality_results": quality_issues}
 
 
 class MockLogicAgent:
-    """Mock logic agent that simulates analysis without API calls"""
-    
     def analyze(self, state: WorkflowState) -> dict:
-        """Simulate logic analysis"""
-        print("🧠 Mock Logic Agent: Analyzing logic...")
-        
         logic_results = []
         for snippet in state.context.code_snippets:
             logic_results.append({
@@ -102,17 +79,11 @@ class MockLogicAgent:
                 ],
                 "complexity_score": 3.2
             })
-        
         return {"logic_results": logic_results}
 
 
 class MockContextAgent:
-    """Mock context agent that simulates enrichment without API calls"""
-    
     def enrich_context(self, state: WorkflowState) -> dict:
-        """Simulate context enrichment"""
-        print("📚 Mock Context Agent: Enriching context...")
-        
         enriched_context = {
             "repo_analysis": {
                 "total_files": len(state.context.code_snippets),
@@ -128,31 +99,24 @@ class MockContextAgent:
                 "avg_function_length": 8.5
             }
         }
-        
         return {"enriched_context": enriched_context}
 
 
 class MockDecisionAgent:
-    """Mock decision agent that simulates decision making without API calls"""
-    
     def make_decision(self, state: WorkflowState) -> dict:
-        """Simulate decision making"""
-        print("⚖️  Mock Decision Agent: Making decision...")
-        
-        # Calculate risk based on findings
         critical_issues = len([issue for issue in state.security_results if issue.severity == "critical"])
         high_issues = len([issue for issue in state.security_results if issue.severity == "high"])
-        
+
         if critical_issues > 0:
-            decision = "REJECT"
+            decision = "BLOCK"
             risk_level = "HIGH"
         elif high_issues > 2:
-            decision = "REVIEW_REQUIRED"
+            decision = "REQUEST_CHANGES"
             risk_level = "MEDIUM"
         else:
             decision = "APPROVE"
             risk_level = "LOW"
-        
+
         decision_data = {
             "decision": decision,
             "risk_level": risk_level,
@@ -163,14 +127,13 @@ class MockDecisionAgent:
                 "Add unit tests for complex logic"
             ]
         }
-        
+
         return {"decision": decision_data}
 
 
 def main():
-    print("Starting Mock Agent System Test (No API Calls)")
-    
-    # Create mock agents
+    print("Starting Mock Agent System Test")
+
     mock_agents = {
         "security": MockSecurityAgent(),
         "quality": MockQualityAgent(),
@@ -178,10 +141,7 @@ def main():
         "context": MockContextAgent(),
         "decision": MockDecisionAgent()
     }
-    
-    print("Mock agent system initialized")
 
-    # Dummy context for testing
     context = AnalysisContext(
         repo_name="test-repo",
         pr_id="123",
@@ -224,18 +184,13 @@ def main():
         ]
     )
 
-    print("\nStarting analysis...")
+    print("Running analysis...")
     start_time = time.time()
 
-    # Create and invoke workflow
     workflow = create_analysis_workflow(mock_agents)
     initial_state = WorkflowState(context=context)
-    
-    # LangGraph workflow.invoke() returns a dictionary, not a WorkflowState object
     result_dict = workflow.invoke(initial_state)
-    
-    # Convert the result dictionary back to WorkflowState object for easier access
-    # or access the values directly from the dictionary
+
     security_results = result_dict.get("security_results", [])
     quality_results = result_dict.get("quality_results", [])
     logic_results = result_dict.get("logic_results", [])
@@ -245,11 +200,9 @@ def main():
     duration = time.time() - start_time
     print(f"\nAnalysis completed in {duration:.2f} seconds")
 
-    # Output results
-    print("\n" + "="*50)
-    print("ANALYSIS RESULTS")
-    print("="*50)
-    
+    print("\nANALYSIS RESULTS")
+    print("-" * 50)
+
     print(f"\nSecurity Issues ({len(security_results)}):")
     for issue in security_results:
         print(f"- [{issue.severity.upper()}] {issue.type}: {issue.description} ({issue.file}:{issue.line})")
@@ -268,9 +221,8 @@ def main():
             print(f"- Issue: {issue}")
 
     print("\nEnriched Context:")
-    if enriched_context:
-        for key, value in enriched_context.items():
-            print(f"- {key}: {value}")
+    for key, value in enriched_context.items():
+        print(f"- {key}: {value}")
 
     print("\nDecision:")
     if isinstance(decision, dict):
@@ -284,21 +236,19 @@ def main():
     else:
         print(f"Decision: {decision}")
 
-    print("\n" + "="*50)
-    print("SUMMARY")
-    print("="*50)
+    print("\nSUMMARY")
+    print("-" * 50)
     print(f"Total Security Issues: {len(security_results)}")
     print(f"Total Quality Issues: {len(quality_results)}")
     print(f"Total Logic Issues: {len(logic_results)}")
-    
-    # Check for critical issues
+
     critical_security = [issue for issue in security_results if issue.severity == "critical"]
     if critical_security:
-        print(f"⚠️  CRITICAL: {len(critical_security)} critical security issues found!")
+        print(f"CRITICAL: {len(critical_security)} critical security issues found!")
     else:
-        print("✅ No critical security issues found")
-    
-    print("✅ Mock test completed successfully!")
+        print("No critical security issues found")
+
+    print("Mock test completed successfully.")
 
 
 if __name__ == "__main__":

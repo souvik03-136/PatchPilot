@@ -29,7 +29,6 @@ Generate remediation plan:
 
     def make_decision(self, state: dict) -> AgentResponse:
         try:
-            # Format the LLM prompt input
             prompt = self.prompt.format(
                 pr_id=state["context"].pr_id,
                 security_issues=str(state.get("security_results", [])[:3]),
@@ -38,11 +37,9 @@ Generate remediation plan:
                 context=str(state.get("enriched_context", {}))
             )
 
-            # Invoke LLM
             response = self.llm.invoke(prompt)
             decision_data = self._parse_response(response)
 
-            # Generate patches for auto-fixable issues
             patches = []
             for issue in decision_data.get("auto_fix_issues", []):
                 patch = generate_patch(issue, state["context"])
@@ -64,7 +61,6 @@ Generate remediation plan:
     def _parse_response(self, response: str) -> dict:
         """Parse LLM response into structured data."""
         try:
-            # Handle JSON block in markdown
             if "```json" in response:
                 json_str = response.split("```json")[1].split("```")[0]
                 return json.loads(json_str)
@@ -73,7 +69,7 @@ Generate remediation plan:
             else:
                 raise ValueError("No valid JSON found")
         except (json.JSONDecodeError, ValueError):
-            # Fallback: approximate decision
+            # Fallback: approximate decision based on text
             return {
                 "decision": "BLOCK" if "critical" in response.lower() else "REQUEST_CHANGES",
                 "summary": response[:200],

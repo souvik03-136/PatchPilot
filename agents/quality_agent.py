@@ -30,14 +30,14 @@ Check for:
 
 For each issue found, respond with JSON format:
 [
-    {{
+    {
         "type": "quality_issue_type",
         "description": "detailed description",
         "line": line_number,
         "file": "filename",
         "severity": "low/medium/high",
         "rule_id": "optional_rule_id"
-    }}
+    }
 ]
 
 If no issues found, return: []
@@ -46,7 +46,6 @@ Response (JSON only):""")
         ])
 
     def analyze(self, state) -> AgentResponse:
-        # ✅ Safely convert state to a dict
         state_dict = dict(state)
         code_snippets = state_dict.get("code_snippets", [])
 
@@ -55,7 +54,6 @@ Response (JSON only):""")
 
         for snippet in code_snippets:
             try:
-                # Defensive handling for tuple input like (index, snippet)
                 if isinstance(snippet, tuple):
                     snippet = snippet[1]
 
@@ -65,7 +63,6 @@ Response (JSON only):""")
                     "code": snippet.content
                 })
 
-                # Parse JSON response
                 try:
                     clean_response = response.strip()
                     if clean_response.startswith("```json"):

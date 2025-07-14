@@ -46,7 +46,6 @@ Response:""")
         ])
 
     def analyze(self, state) -> AgentResponse:
-        # ✅ Safely convert WorkflowState to dictionary
         state_dict = dict(state)
         code_snippets = state_dict.get("code_snippets", [])
 
@@ -55,7 +54,7 @@ Response:""")
 
         for snippet in code_snippets:
             try:
-                if isinstance(snippet, tuple):  # defensive unpack
+                if isinstance(snippet, tuple):
                     snippet = snippet[1]
 
                 chain = self.prompt | self.llm | self.parser

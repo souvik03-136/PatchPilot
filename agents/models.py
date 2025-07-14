@@ -2,14 +2,16 @@ from typing import List, Dict, Any, Optional, Annotated
 from pydantic import BaseModel, Field
 import operator
 
-# ✅ Represents a snippet of source code for analysis
+
 class CodeSnippet(BaseModel):
+    """Represents a snippet of source code for analysis."""
     file_path: str
     content: str
     language: str
 
-# ✅ Represents a security issue detected in the code
+
 class Vulnerability(BaseModel):
+    """Represents a security issue detected in the code."""
     type: str
     severity: str = "medium"  # low | medium | high | critical
     description: str
@@ -17,8 +19,9 @@ class Vulnerability(BaseModel):
     file: str
     confidence: float = 0.8
 
-# ✅ Represents a code quality issue (e.g., style, complexity)
+
 class QualityIssue(BaseModel):
+    """Represents a code quality issue (e.g., style, complexity)."""
     type: str
     description: str
     line: int
@@ -26,28 +29,30 @@ class QualityIssue(BaseModel):
     severity: str = "low"
     rule_id: Optional[str] = None
 
-# ✅ Shared context across all analysis agents (e.g., repo metadata, history)
+
 class AnalysisContext(BaseModel):
+    """Shared context across all analysis agents (e.g., repo metadata, history)."""
     repo_name: str = "unknown"
     pr_id: str = "unknown"
     author: str = "unknown"
-    commit_history: List[Dict] = Field(default_factory=list)  # e.g., list of commit dicts
-    previous_issues: List[Vulnerability] = Field(default_factory=list)  # historical issues
-    code_snippets: List[CodeSnippet] = Field(default_factory=list)  # target code files for analysis
-    agent_memory: Dict[str, Any] = Field(default_factory=dict)  # optional persistent state
+    commit_history: List[Dict] = Field(default_factory=list)
+    previous_issues: List[Vulnerability] = Field(default_factory=list)
+    code_snippets: List[CodeSnippet] = Field(default_factory=list)
+    agent_memory: Dict[str, Any] = Field(default_factory=dict)
 
-# ✅ Generic response wrapper returned by agents
+
 class AgentResponse(BaseModel):
+    """Generic response wrapper returned by agents."""
     success: bool
     results: List[Any] = Field(default_factory=list)
     errors: List[str] = Field(default_factory=list)
     metadata: Dict[str, Any] = Field(default_factory=dict)
     next_steps: List[str] = Field(default_factory=list)
 
-# ✅ Main state structure used in LangGraph StateGraph
+
 class WorkflowState(BaseModel):
+    """Main state structure used in LangGraph StateGraph."""
     context: AnalysisContext
-    # ✅ Using operator.add for parallel-safe updates
     security_results: Annotated[List[Vulnerability], operator.add] = []
     quality_results: Annotated[List[QualityIssue], operator.add] = []
     logic_results: Annotated[List[Any], operator.add] = []

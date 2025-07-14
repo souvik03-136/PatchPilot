@@ -1,5 +1,3 @@
-# tools.py
-
 import os
 import re
 import difflib
@@ -128,7 +126,7 @@ def generate_patch(issue: dict, context) -> dict:
                 fix = "Parameterized SQL query"
 
         else:
-            return None  # Not auto-fixable
+            return None
 
         diff = list(difflib.unified_diff(
             snippet.content.splitlines(),
@@ -148,11 +146,10 @@ def generate_patch(issue: dict, context) -> dict:
         return None
 
 
+
 '''
-What's Included
 Works seamlessly with your agents (ContextAgent, DecisionAgent, etc.)
 Can auto-fix:
-Hardcoded secrets → replaced with os.getenv(...)
 Unparameterized SQL queries → adds ? for placeholders
 Filters high/critical severity issues for prioritization
 Dynamically loads the right model based on agent type and provider
