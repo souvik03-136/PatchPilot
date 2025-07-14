@@ -47,6 +47,10 @@ If no vulnerabilities found, return: []
 Response (JSON only):""")
         ])
 
+    def _create_chain(self):
+        """Create the LangChain chain for processing."""
+        return self.prompt | self.llm | self.parser
+
     def analyze(self, state) -> AgentResponse:
         state_dict = dict(state)
         code_snippets = state_dict.get("code_snippets", [])
@@ -59,7 +63,7 @@ Response (JSON only):""")
                 if isinstance(snippet, tuple):
                     snippet = snippet[1]
 
-                chain = self.prompt | self.llm | self.parser
+                chain = self._create_chain()
                 response = chain.invoke({
                     "file_path": snippet.file_path,
                     "code": snippet.content
@@ -84,6 +88,7 @@ Response (JSON only):""")
                                 confidence=item.get("confidence", 0.8)
                             )
                             results.append(vulnerability)
+
                 except json.JSONDecodeError:
                     if "vulnerability" in response.lower() or "security" in response.lower():
                         results.append(Vulnerability(

@@ -45,6 +45,9 @@ If no issues found, return: []
 Response (JSON only):""")
         ])
 
+    def _create_chain(self):
+        return self.prompt | self.llm | self.parser
+
     def analyze(self, state) -> AgentResponse:
         state_dict = dict(state)
         code_snippets = state_dict.get("code_snippets", [])
@@ -57,7 +60,7 @@ Response (JSON only):""")
                 if isinstance(snippet, tuple):
                     snippet = snippet[1]
 
-                chain = self.prompt | self.llm | self.parser
+                chain = self._create_chain()
                 response = chain.invoke({
                     "file_path": snippet.file_path,
                     "code": snippet.content

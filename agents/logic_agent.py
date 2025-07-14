@@ -45,6 +45,10 @@ If no issues found, state: "No logic issues detected."
 Response:""")
         ])
 
+    def _create_chain(self):
+        """Create and return the prompt → LLM → parser chain."""
+        return self.prompt | self.llm | self.parser
+
     def analyze(self, state) -> AgentResponse:
         state_dict = dict(state)
         code_snippets = state_dict.get("code_snippets", [])
@@ -57,7 +61,7 @@ Response:""")
                 if isinstance(snippet, tuple):
                     snippet = snippet[1]
 
-                chain = self.prompt | self.llm | self.parser
+                chain = self._create_chain()
                 analysis = chain.invoke({
                     "file_path": snippet.file_path,
                     "code": snippet.content
