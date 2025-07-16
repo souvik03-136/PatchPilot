@@ -1,0 +1,5 @@
+flask
+flask-cors
+psutil
+python-dotenv
+gunicorn
