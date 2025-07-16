@@ -30,6 +30,9 @@ settings = {
 analysis_history = []
 analysis_queue = []
 
+# Thread lock for thread-safe operations
+thread_lock = threading.Lock()
+
 # Health check endpoint
 @app.route('/health', methods=['GET'])
 def health_check():
@@ -50,7 +53,6 @@ def root():
             "agents": "/api/agents/status"
         }
     })
-
 
 @app.route('/api', methods=['GET'])
 def api_info():
@@ -154,12 +156,14 @@ def analyze_pr():
         "results": None
     }
     
-    # Add to queue and start processing in background
-    analysis_queue.append(task)
-    threading.Thread(target=process_analysis_task, args=(task_id,)).start()
+    # Thread-safe operations
+    with thread_lock:
+        # Add to queue and store in pull_requests BEFORE starting thread
+        analysis_queue.append(task)
+        pull_requests[task_id] = task
     
-    # Store in pull_requests
-    pull_requests[task_id] = task
+    # Start processing in background
+    threading.Thread(target=process_analysis_task, args=(task_id,)).start()
     
     return jsonify({
         "message": "Analysis started",
@@ -168,56 +172,76 @@ def analyze_pr():
     }), 202
 
 def process_analysis_task(task_id):
-    task = pull_requests[task_id]
-    task["status"] = "processing"
-    task["started_at"] = datetime.utcnow().isoformat()
-    
-    # Simulate analysis work
-    time.sleep(5)  # Simulate processing time
-    
-    # Generate mock analysis results
-    task["results"] = {
-        "security_issues": [
-            {
-                "type": "Hardcoded Secret",
-                "severity": "high",
-                "description": "API key found in source code",
-                "line": 42,
-                "file": "config.py"
+    try:
+        # Wait a bit to ensure task is in dictionary
+        time.sleep(0.1)
+        
+        with thread_lock:
+            task = pull_requests.get(task_id)
+            if not task:
+                print(f"Error: Task {task_id} not found in pull_requests")
+                return
+            
+            task["status"] = "processing"
+            task["started_at"] = datetime.utcnow().isoformat()
+        
+        # Simulate analysis work
+        time.sleep(5)  # Simulate processing time
+        
+        # Generate mock analysis results
+        results = {
+            "security_issues": [
+                {
+                    "type": "Hardcoded Secret",
+                    "severity": "high",
+                    "description": "API key found in source code",
+                    "line": 42,
+                    "file": "config.py"
+                }
+            ],
+            "quality_issues": [
+                {
+                    "type": "Code Complexity",
+                    "severity": "medium",
+                    "description": "Function too long (35 lines)",
+                    "line": 15,
+                    "file": "utils.py"
+                }
+            ],
+            "logic_issues": [
+                {
+                    "file": "app.py",
+                    "analysis": "Potential null pointer exception",
+                    "suggestions": ["Add null check before accessing object"]
+                }
+            ],
+            "decision": {
+                "decision": "REQUEST_CHANGES",
+                "risk_level": "medium",
+                "summary": "1 security issue and 1 quality issue found",
+                "recommendations": [
+                    "Replace hardcoded API key with environment variable",
+                    "Refactor long function into smaller units"
+                ]
             }
-        ],
-        "quality_issues": [
-            {
-                "type": "Code Complexity",
-                "severity": "medium",
-                "description": "Function too long (35 lines)",
-                "line": 15,
-                "file": "utils.py"
-            }
-        ],
-        "logic_issues": [
-            {
-                "file": "app.py",
-                "analysis": "Potential null pointer exception",
-                "suggestions": ["Add null check before accessing object"]
-            }
-        ],
-        "decision": {
-            "decision": "REQUEST_CHANGES",
-            "risk_level": "medium",
-            "summary": "1 security issue and 1 quality issue found",
-            "recommendations": [
-                "Replace hardcoded API key with environment variable",
-                "Refactor long function into smaller units"
-            ]
         }
-    }
-    
-    task["status"] = "completed"
-    task["completed_at"] = datetime.utcnow().isoformat()
-    
-    # Add to history
-    analysis_history.append(task)
+        
+        with thread_lock:
+            task["results"] = results
+            task["status"] = "completed"
+            task["completed_at"] = datetime.utcnow().isoformat()
+            
+            # Add to history
+            analysis_history.append(task.copy())
+            
+        print(f"Analysis task {task_id} completed successfully")
+        
+    except Exception as e:
+        print(f"Error processing analysis task {task_id}: {str(e)}")
+        with thread_lock:
+            if task_id in pull_requests:
+                pull_requests[task_id]["status"] = "error"
+                pull_requests[task_id]["error"] = str(e)
 
 # Analytics endpoint
 @app.route('/api/analytics', methods=['GET'])
@@ -234,18 +258,28 @@ def get_analytics():
         start_time = now - timedelta(days=7)
     
     # Filter completed analyses in time range
-    completed_analyses = [
-        t for t in analysis_history 
-        if t["status"] == "completed" and 
-           datetime.fromisoformat(t["completed_at"]) > start_time
-    ]
+    completed_analyses = []
+    for t in analysis_history:
+        if t["status"] == "completed" and t.get("completed_at"):
+            try:
+                completed_at = datetime.fromisoformat(t["completed_at"])
+                if completed_at > start_time:
+                    completed_analyses.append(t)
+            except ValueError:
+                continue
     
     # Generate metrics
     issue_counts = {
-        "security": sum(len(t["results"]["security_issues"]) for t in completed_analyses),
-        "quality": sum(len(t["results"]["quality_issues"]) for t in completed_analyses),
-        "logic": sum(len(t["results"]["logic_issues"]) for t in completed_analyses)
+        "security": 0,
+        "quality": 0,
+        "logic": 0
     }
+    
+    for t in completed_analyses:
+        if t.get("results"):
+            issue_counts["security"] += len(t["results"].get("security_issues", []))
+            issue_counts["quality"] += len(t["results"].get("quality_issues", []))
+            issue_counts["logic"] += len(t["results"].get("logic_issues", []))
     
     return jsonify({
         "time_range": time_range,
@@ -298,7 +332,8 @@ def get_task_status(task_id):
             "created_at": task["created_at"],
             "started_at": task.get("started_at"),
             "completed_at": task.get("completed_at"),
-            "results": task.get("results")
+            "results": task.get("results"),
+            "error": task.get("error")
         })
     return jsonify({"error": "Task not found"}), 404
 
@@ -306,6 +341,9 @@ if __name__ == '__main__':
     # Load environment variables
     port = int(os.getenv('BACKEND_PORT', 8000))
     debug = os.getenv('DEBUG', 'True') == 'True'
+    
+    print(f"Starting PatchPilot Backend on port {port}")
+    print(f"Debug mode: {debug}")
     
     # Start the server
     app.run(host='0.0.0.0', port=port, debug=debug)
