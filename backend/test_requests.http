@@ -1,4 +1,5 @@
 @baseUrl = http://localhost:8000
+@contentType = application/json
 
 ### 1. Health Check
 GET {{baseUrl}}/health HTTP/1.1
@@ -9,42 +10,90 @@ GET {{baseUrl}}/api/metrics HTTP/1.1
 ### 3. Get Agent Status
 GET {{baseUrl}}/api/agents/status HTTP/1.1
 
-### 4. Get Repositories
+### 4. Get Repositories (should be empty initially)
 GET {{baseUrl}}/api/repositories HTTP/1.1
 
 ### 5. Add Repository
+# @name addRepo
 POST {{baseUrl}}/api/repositories HTTP/1.1
-Content-Type: application/json
+Content-Type: {{contentType}}
 
 {
   "repo_url": "https://github.com/user/repo",
   "webhook_secret": "secret123"
 }
 
-### 6. Delete Repository (replace {id} with actual ID)
-DELETE {{baseUrl}}/api/repositories/{id} HTTP/1.1
+### Save repository ID for later use
+@repoId = {{addRepo.response.body.$.id}}
+
+### 6. Delete Repository
+DELETE {{baseUrl}}/api/repositories/{{repoId}} HTTP/1.1
 
 ### 7. Analyze PR
+# @name analyzePR
 POST {{baseUrl}}/api/analysis/pr HTTP/1.1
-Content-Type: application/json
+Content-Type: {{contentType}}
 
 {
   "pr_url": "https://github.com/user/repo/pull/1",
   "analysis_mode": "standard"
 }
 
-### 8. Get Task Status (replace {task_id} with actual ID)
-GET {{baseUrl}}/api/analysis/status/{task_id} HTTP/1.1
+### Save task ID for status checks
+@taskId = {{analyzePR.response.body.$.task_id}}
 
-### 9. Get Analytics
+### 8. Get Task Status - Immediately after starting
+GET {{baseUrl}}/api/analysis/status/{{taskId}} HTTP/1.1
+
+### Wait 3 seconds then check status again
+# Click the delay link below, then run the next request
+# 
+# Delay: https://localhost:8000/delay/3  (just a comment, not a real endpoint)
+
+### 8b. Get Task Status - After 3 seconds
+GET {{baseUrl}}/api/analysis/status/{{taskId}} HTTP/1.1
+
+### Wait 3 more seconds (total 6 seconds) then check final status
+# Delay: https://localhost:8000/delay/3  (just a comment)
+
+### 8c. Get Task Status - After 6 seconds (should be complete)
+GET {{baseUrl}}/api/analysis/status/{{taskId}} HTTP/1.1
+
+### 9. NEW: Direct Security Analysis
+# @name securityAnalysis
+POST {{baseUrl}}/api/analysis/security HTTP/1.1
+Content-Type: {{contentType}}
+
+{
+  "code_snippets": [
+    {
+      "file_path": "app.py",
+      "content": "def login(username, password):\n    admin_pass = 'superSecret123'\n    if password == admin_pass:\n        return True\n    return False",
+      "language": "python"
+    },
+    {
+      "file_path": "utils.py",
+      "content": "def process_data(data):\n    result = []\n    for item in data:\n        if item['status'] == 'active':\n            if item['value'] > 100:\n                result.append(item['value'] * 1.1)\n            else:\n                result.append(item['value'] * 0.9)\n        else:\n            result.append(None)\n    return result",
+      "language": "python"
+    }
+  ]
+}
+
+### Save security analysis task ID
+@securityTaskId = {{securityAnalysis.response.body.$.task_id}}
+
+### 10. Get Security Analysis Status
+GET {{baseUrl}}/api/analysis/status/{{securityTaskId}} HTTP/1.1
+
+### 11. Get Analytics
 GET {{baseUrl}}/api/analytics?range=7d HTTP/1.1
 
-### 10. Get Agent Config
+### 12. Get Agent Config
 GET {{baseUrl}}/api/agents/config HTTP/1.1
 
-### 11. Update Agent Config
+### 13. Update Agent Config
 POST {{baseUrl}}/api/agents/config HTTP/1.1
-Content-Type: application/json
+Content-Type: {{contentType}}
 
 {
   "security": {
@@ -52,26 +101,29 @@ Content-Type: application/json
   }
 }
 
-### 12. Update GitHub Settings
+### 14. Update GitHub Settings
 POST {{baseUrl}}/api/settings/github HTTP/1.1
-Content-Type: application/json
+Content-Type: {{contentType}}
 
 {
   "token": "new_token"
 }
 
-### 13. Update Notification Settings
+### 15. Update Notification Settings
 POST {{baseUrl}}/api/settings/notifications HTTP/1.1
-Content-Type: application/json
+Content-Type: {{contentType}}
 
 {
   "email": "new@example.com"
 }
 
-### 14. Update Security Settings
+### 16. Update Security Settings
 POST {{baseUrl}}/api/settings/security HTTP/1.1
-Content-Type: application/json
+Content-Type: {{contentType}}
 
 {
   "block_critical": false
 }
+
+### 17. Verify GitHub Settings Update
+GET {{baseUrl}}/api/settings HTTP/1.1

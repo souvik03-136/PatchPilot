@@ -71,6 +71,146 @@ def api_info():
         ]
     })
 
+@app.route('/api/analysis/security', methods=['POST'])
+def analyze_security():
+    data = request.json
+    code_snippets = data.get('code_snippets', [])
+    
+    # Create a new analysis task
+    task_id = str(uuid.uuid4())
+    task = {
+        "id": task_id,
+        "type": "security",
+        "code_snippets": code_snippets,
+        "status": "queued",
+        "created_at": datetime.utcnow().isoformat(),
+        "started_at": None,
+        "completed_at": None,
+        "results": None
+    }
+    
+    # Thread-safe operations - store task BEFORE starting thread
+    with thread_lock:
+        analysis_queue.append(task)
+        pull_requests[task_id] = task
+    
+    # Start processing in background AFTER storing the task
+    threading.Thread(target=process_security_analysis, args=(task_id,)).start()
+    
+    return jsonify({
+        "message": "Security analysis started",
+        "task_id": task_id,
+        "status": "queued"
+    }), 202
+
+
+def process_security_analysis(task_id):
+    try:
+        # Wait a bit to ensure task is in dictionary
+        time.sleep(0.1)
+        
+        with thread_lock:
+            task = pull_requests.get(task_id)
+            if not task:
+                print(f"Error: Task {task_id} not found in pull_requests")
+                return
+            
+            task["status"] = "processing"
+            task["started_at"] = datetime.utcnow().isoformat()
+        
+        # Simulate analysis work
+        time.sleep(3)
+        
+        # Analyze the code snippets
+        security_issues = []
+        
+        for snippet in task["code_snippets"]:
+            issues = analyze_snippet(snippet)
+            security_issues.extend(issues)
+        
+        # Generate results
+        results = {
+            "security_issues": security_issues,
+            "summary": f"Found {len(security_issues)} security issues",
+            "decision": generate_decision(security_issues)
+        }
+        
+        with thread_lock:
+            task["results"] = results
+            task["status"] = "completed"
+            task["completed_at"] = datetime.utcnow().isoformat()
+            
+            # Add to history
+            analysis_history.append(task.copy())
+        
+        print(f"Security analysis task {task_id} completed successfully")
+        
+    except Exception as e:
+        print(f"Error processing security analysis task {task_id}: {str(e)}")
+        with thread_lock:
+            if task_id in pull_requests:
+                pull_requests[task_id]["status"] = "error"
+                pull_requests[task_id]["error"] = str(e)
+
+def analyze_snippet(snippet):
+    issues = []
+    content = snippet["content"]
+    
+    # Check for hardcoded secrets
+    if "'superSecret123'" in content or '"superSecret123"' in content:
+        issues.append({
+            "type": "Hardcoded Secret",
+            "severity": "critical",
+            "description": "Hardcoded password found in source code",
+            "line": find_line_number(content, "admin_pass ="),
+            "file": snippet["file_path"],
+            "confidence": 0.95
+        })
+    
+    # Check for insecure comparisons
+    if "password ==" in content:
+        issues.append({
+            "type": "Insecure Comparison",
+            "severity": "high",
+            "description": "Direct string comparison of passwords may be vulnerable to timing attacks",
+            "line": find_line_number(content, "password =="),
+            "file": snippet["file_path"],
+            "confidence": 0.85
+        })
+    
+    # Add more security checks as needed
+    return issues
+
+def find_line_number(content, pattern):
+    lines = content.split('\n')
+    for i, line in enumerate(lines):
+        if pattern in line:
+            return i + 1
+    return 0
+
+def generate_decision(issues):
+    critical_count = sum(1 for i in issues if i["severity"] == "critical")
+    high_count = sum(1 for i in issues if i["severity"] == "high")
+    
+    if critical_count > 0:
+        return {
+            "decision": "REJECT",
+            "risk_level": "critical",
+            "recommendations": ["Fix critical security issues immediately"]
+        }
+    elif high_count > 0:
+        return {
+            "decision": "REQUEST_CHANGES",
+            "risk_level": "high",
+            "recommendations": ["Address high severity security issues"]
+        }
+    else:
+        return {
+            "decision": "APPROVE",
+            "risk_level": "low",
+            "recommendations": ["No critical security issues found"]
+        }
+
 # System metrics endpoint
 @app.route('/api/metrics', methods=['GET'])
 def get_metrics():

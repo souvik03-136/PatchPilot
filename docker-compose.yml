@@ -16,10 +16,15 @@ services:
       - sentinel-net
 
   backend:
-    image: your-backend-image:latest  # Replace with your backend image
+    build: ./backend
     container_name: patchpilot-backend
     ports:
       - "8000:8000"
+    environment:
+      - BACKEND_PORT=8000
+      - DEBUG=False
+    volumes:
+      - ./backend:/app
     networks:
       - sentinel-net
 
