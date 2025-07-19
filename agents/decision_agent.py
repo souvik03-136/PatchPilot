@@ -49,8 +49,10 @@ Generate remediation plan:
             return AgentResponse(
                 success=True,
                 results=[decision_data],
-                patches=patches,
-                metadata={"critical_issues": decision_data.get("critical_issues", [])}
+                metadata={
+                    "patches": patches,  # <- Store patches in metadata instead
+                    "critical_issues": decision_data.get("critical_issues", [])
+                }
             )
         except Exception as e:
             return AgentResponse(

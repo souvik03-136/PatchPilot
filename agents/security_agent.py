@@ -11,6 +11,7 @@ class SecurityAgent:
         self.llm = self.llm_provider.get_llm("security")
         self.parser = StrOutputParser()
 
+        # Fixed prompt with properly escaped JSON curly braces
         self.prompt = ChatPromptTemplate.from_messages([
             ("user", """You are a security expert. Analyze this code for security vulnerabilities:
 
@@ -32,14 +33,14 @@ Find these security issues:
 
 For each vulnerability found, respond with JSON format:
 [
-    {
+    {{
         "type": "vulnerability_type",
         "severity": "low/medium/high/critical",
         "description": "detailed description",
         "line": line_number,
         "file": "filename",
         "confidence": confidence_score
-    }
+    }}
 ]
 
 If no vulnerabilities found, return: []

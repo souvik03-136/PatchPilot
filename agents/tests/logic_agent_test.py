@@ -1,186 +1,721 @@
 import os
 import sys
-from unittest.mock import patch, Mock
+import time
+import json
+from unittest.mock import Mock, patch, MagicMock
+from dotenv import load_dotenv
 
-# Add root path to import modules
+# Add root to path so `agents` can be imported
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..")))
 
+from agents.models import AnalysisContext, CodeSnippet, AgentResponse
 from agents.logic_agent import LogicAgent
-from agents.models import CodeSnippet, AgentResponse
+
+load_dotenv()
 
 
-def get_mock_snippet(file_path="test.py", content="def main(): pass"):
-    return CodeSnippet(
-        file_path=file_path,
-        content=content,
-        language="python"
-    )
+from langchain_core.runnables.base import Runnable
+from langchain_core.runnables.utils import Input, Output
 
 
-# Create a mock class that properly simulates the LangChain expression language
-class ChainMock:
-    def __init__(self, return_value=None):
-        self.return_value = return_value
-        
-    def __or__(self, other):
-        # Simulate chaining by returning a new ChainMock
-        return ChainMock(self.return_value)
-        
-    def invoke(self, input_data):
-        # Return the pre-configured analysis text
-        return self.return_value
+class MockLLM(Runnable):
+    """Mock LLM for testing that implements LangChain's Runnable interface"""
+    
+    def __init__(self, response_type="issues_found"):
+        self.response_type = response_type
+        super().__init__()
+    
+    def invoke(self, input: Input, config=None, **kwargs) -> Output:
+        if self.response_type == "issues_found":
+            return """
+## Logic Analysis for test_file.py
+
+### Issues Found:
+1. **Null Pointer Exception**: Variable 'user' could be null
+   - Line: 15
+   - Severity: High
+   - Fix: Add null check before accessing user properties
+
+2. **Race Condition**: Shared variable access without synchronization
+   - Line: 25
+   - Severity: Medium
+   - Fix: Use proper locking mechanism
+
+### Suggestions:
+- Add input validation for all user inputs
+- Implement proper error handling
+"""
+        elif self.response_type == "no_issues":
+            return """
+## Logic Analysis for clean_file.py
+
+No logic issues detected.
+
+The code follows best practices and handles edge cases properly.
+"""
+        elif self.response_type == "complex_issues":
+            return """
+## Logic Analysis for complex_file.py
+
+### Issues Found:
+1. **Infinite Loop**: Loop condition never changes
+   - Line: 42
+   - Severity: High
+   - Fix: Update loop variable inside the loop
+
+2. **Memory Leak**: Resources not properly released
+   - Line: 18
+   - Severity: High
+   - Fix: Use try-with-resources or proper cleanup
+
+3. **API Contract Violation**: Method returns null instead of empty collection
+   - Line: 55
+   - Severity: Medium
+   - Fix: Return empty list instead of null
+
+4. **Edge Case Handling**: Division by zero not handled
+   - Line: 30
+   - Severity: Medium
+   - Fix: Check for zero before division
+
+### Suggestions:
+- Implement comprehensive unit tests
+- Add logging for debugging
+- Use defensive programming practices
+"""
+        elif self.response_type == "malformed":
+            return "This is a malformed response without proper structure"
+        elif self.response_type == "exception":
+            raise Exception("LLM connection failed")
+        else:
+            return "## Logic Analysis\n\nGeneric analysis response"
+    
+    async def ainvoke(self, input: Input, config=None, **kwargs) -> Output:
+        return self.invoke(input, config, **kwargs)
+    
+    def batch(self, inputs, config=None, **kwargs):
+        return [self.invoke(inp, config, **kwargs) for inp in inputs]
+    
+    async def abatch(self, inputs, config=None, **kwargs):
+        return [await self.ainvoke(inp, config, **kwargs) for inp in inputs]
+    
+    def stream(self, input: Input, config=None, **kwargs):
+        yield self.invoke(input, config, **kwargs)
+    
+    async def astream(self, input: Input, config=None, **kwargs):
+        yield self.invoke(input, config, **kwargs)
 
 
-def test_initialization():
+class MockFreeLLMProvider:
+    """Mock FreeLLMProvider for testing"""
+    def __init__(self, provider):
+        self.provider = provider
+        self.mock_llm = None
+    
+    def set_response_type(self, response_type):
+        self.mock_llm = MockLLM(response_type)
+    
+    def get_llm(self, agent_type):
+        if self.mock_llm is None:
+            self.mock_llm = MockLLM()
+        return self.mock_llm
+
+
+def mock_parse_code_blocks(text):
+    """Mock parse_code_blocks function"""
+    # Extract suggestions from the analysis text
+    suggestions = []
+    if "suggestions:" in text.lower():
+        lines = text.split('\n')
+        in_suggestions = False
+        for line in lines:
+            if "suggestions:" in line.lower():
+                in_suggestions = True
+                continue
+            if in_suggestions and line.strip().startswith('-'):
+                suggestions.append(line.strip()[1:].strip())
+    return suggestions
+
+
+def create_test_code_snippets():
+    """Create test code snippets"""
+    return [
+        CodeSnippet(
+            file_path="test_file.py",
+            content="""def process_user(user_id):
+    user = get_user(user_id)
+    if user:
+        return user.name
+    return None""",
+            language="python"
+        ),
+        CodeSnippet(
+            file_path="clean_file.py",
+            content="""def add_numbers(a, b):
+    if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
+        raise ValueError("Both arguments must be numbers")
+    return a + b""",
+            language="python"
+        ),
+        CodeSnippet(
+            file_path="complex_file.py",
+            content="""def complex_function(data):
+    result = []
+    for item in data:
+        if item > 0:
+            result.append(item * 2)
+    return result""",
+            language="python"
+        )
+    ]
+
+
+def create_test_state(snippet_count=1):
+    """Create test state for logic analysis"""
+    snippets = create_test_code_snippets()[:snippet_count]
+    return {
+        "code_snippets": snippets,
+        "context": AnalysisContext(
+            repo_name="test-logic-repo",
+            pr_id="PR-456",
+            author="john.doe",
+            commit_history=[
+                {"id": "abc123", "message": "feat: add user processing"},
+                {"id": "def456", "message": "fix: handle edge cases"}
+            ],
+            previous_issues=[],
+            code_snippets=snippets
+        )
+    }
+
+
+def test_logic_agent_initialization():
+    """Test LogicAgent initialization"""
     print("Testing LogicAgent initialization...")
-
-    with patch("agents.logic_agent.FreeLLMProvider") as mock_provider:
-        mock_llm = Mock()
-        mock_instance = mock_provider.return_value
-        mock_instance.get_llm.return_value = mock_llm
-
+    
+    with patch('agents.logic_agent.FreeLLMProvider', MockFreeLLMProvider):
+        # Create agent
         agent = LogicAgent(provider="gemini")
-
-        assert agent.llm is mock_llm
+        
+        # Verify initialization
+        assert agent.llm is not None
+        assert agent.parser is not None
         assert agent.prompt is not None
-        print("LogicAgent initialized successfully")
-
-
-def test_analyze_with_issues():
-    print("\nTesting analyze method with detected issues...")
-
-    analysis_text = """
-    ## Logic Analysis for test.py
-
-    ### Issues Found:
-    1. **Infinite Loop**: Loop without break condition
-       - Line: 10
-       - Severity: High
-       - Fix: Add a termination condition
-
-    ### Suggestions:
-    - Review loop logic
-    """
-
-    with patch("agents.logic_agent.FreeLLMProvider") as mock_provider, \
-         patch("agents.logic_agent.parse_code_blocks") as mock_parse_blocks:
-
-        # Mock the LLM provider
-        mock_llm = Mock()
-        mock_provider.return_value.get_llm.return_value = mock_llm
+        assert agent.llm_provider is not None
+        assert isinstance(agent.llm, MockLLM)
         
-        # Mock parsing code blocks
-        mock_parse_blocks.return_value = ["Review loop logic"]
+        print("✓ LogicAgent initialized successfully")
 
-        # Create a mock chain that returns our analysis text
-        mock_chain = ChainMock(return_value=analysis_text)
+
+def test_logic_agent_initialization_with_custom_llm():
+    """Test LogicAgent initialization with custom LLM"""
+    print("\nTesting LogicAgent initialization with custom LLM...")
+    
+    custom_llm = MockLLM()
+    agent = LogicAgent(llm=custom_llm)
+    
+    # Verify initialization
+    assert agent.llm is custom_llm
+    assert agent.parser is not None
+    assert agent.prompt is not None
+    assert not hasattr(agent, 'llm_provider')  # Should not have provider when custom LLM provided
+    
+    print("✓ LogicAgent initialized with custom LLM successfully")
+
+
+def test_analyze_with_issues_found():
+    """Test logic analysis when issues are found"""
+    print("\nTesting logic analysis with issues found...")
+    
+    with patch('agents.logic_agent.FreeLLMProvider', MockFreeLLMProvider), \
+         patch('agents.logic_agent.parse_code_blocks', side_effect=mock_parse_code_blocks):
         
-        # Patch the chain creation to return our mock chain
-        with patch.object(LogicAgent, '_create_chain', return_value=mock_chain):
-            agent = LogicAgent()
-            state = {
-                "code_snippets": [get_mock_snippet()]
-            }
-
-            response = agent.analyze(state)
-
-            assert isinstance(response, AgentResponse)
-            assert response.success is True
-            assert len(response.results) == 1
-            assert response.results[0]["has_issues"] is True
-            assert "analysis" in response.results[0]
-            assert response.errors == []
-
-            print("Logic analysis completed with issues detected")
-
-
-def test_analyze_no_issues():
-    print("\nTesting analyze method with no issues...")
-
-    analysis_text = "No logic issues detected."
-
-    with patch("agents.logic_agent.FreeLLMProvider") as mock_provider, \
-         patch("agents.logic_agent.parse_code_blocks") as mock_parse_blocks:
-
-        # Mock the LLM provider
-        mock_llm = Mock()
-        mock_provider.return_value.get_llm.return_value = mock_llm
+        # Create agent and test state
+        agent = LogicAgent(provider="gemini")
+        agent.llm_provider.set_response_type("issues_found")
+        agent.llm = agent.llm_provider.get_llm("logic")
         
-        # Mock parsing code blocks
-        mock_parse_blocks.return_value = []
-
-        # Create a mock chain that returns our analysis text
-        mock_chain = ChainMock(return_value=analysis_text)
+        state = create_test_state(1)
         
-        # Patch the chain creation to return our mock chain
-        with patch.object(LogicAgent, '_create_chain', return_value=mock_chain):
-            agent = LogicAgent()
-            state = {
-                "code_snippets": [get_mock_snippet()]
-            }
-
-            response = agent.analyze(state)
-
-            assert isinstance(response, AgentResponse)
-            assert response.success is True
-            assert response.results[0]["has_issues"] is False
-            assert response.errors == []
-            assert response.metadata["total_files"] == 1
-
-            print("Logic analysis completed with no issues detected")
-
-
-def test_analyze_with_exception():
-    print("\nTesting analyze method with exception...")
-
-    # Create a mock chain that raises an exception when invoked
-    class FailingChainMock:
-        def __or__(self, other):
-            return self
-            
-        def invoke(self, input_data):
-            raise Exception("LLM failed")
-
-    with patch("agents.logic_agent.FreeLLMProvider") as mock_provider, \
-         patch.object(LogicAgent, '_create_chain') as mock_create_chain:
-
-        # Let the agent initialize properly
-        mock_llm = Mock()
-        mock_provider.return_value.get_llm.return_value = mock_llm
-        
-        # Set up the chain to fail during analysis
-        mock_create_chain.return_value = FailingChainMock()
-
-        agent = LogicAgent()
-        state = {
-            "code_snippets": [get_mock_snippet()]
-        }
+        # Test analysis
+        start_time = time.time()
         response = agent.analyze(state)
+        duration = time.time() - start_time
+        
+        # Debug: Print what we actually got
+        print(f"DEBUG - Response success: {response.success}")
+        print(f"DEBUG - Response results count: {len(response.results)}")
+        print(f"DEBUG - Response errors: {response.errors}")
+        print(f"DEBUG - Response metadata: {response.metadata}")
+        
+        # Verify response
+        assert response.success == True
+        assert len(response.results) == 1
+        assert len(response.errors) == 0
+        
+        # Check first result
+        result = response.results[0]
+        assert result["file"] == "test_file.py"
+        assert result["has_issues"] == True
+        assert "null pointer exception" in result["analysis"].lower()
+        assert "race condition" in result["analysis"].lower()
+        assert isinstance(result["suggestions"], list)
+        
+        # Check metadata
+        assert response.metadata["total_files"] == 1
+        assert response.metadata["analyses_completed"] == 1
+        
+        print(f"✓ Logic analysis with issues completed in {duration:.3f} seconds")
+        print(f"✓ Issues detected: {result['has_issues']}")
+        print(f"✓ File analyzed: {result['file']}")
 
-        assert response.success is False
-        assert len(response.errors) == 1
-        assert "Error analyzing" in response.errors[0]
-        assert "LLM failed" in response.errors[0]
 
-        print("Exception properly handled during analysis")
+def test_analyze_with_no_issues():
+    """Test logic analysis when no issues are found"""
+    print("\nTesting logic analysis with no issues...")
+    
+    with patch('agents.logic_agent.FreeLLMProvider', MockFreeLLMProvider), \
+         patch('agents.logic_agent.parse_code_blocks', side_effect=mock_parse_code_blocks):
+        
+        # Create agent and test state
+        agent = LogicAgent(provider="gemini")
+        agent.llm_provider.set_response_type("no_issues")
+        agent.llm = agent.llm_provider.get_llm("logic")
+        
+        state = create_test_state(1)
+        
+        # Test analysis
+        response = agent.analyze(state)
+        
+        # Verify response
+        assert response.success == True
+        assert len(response.results) == 1
+        assert len(response.errors) == 0
+        
+        # Check result
+        result = response.results[0]
+        assert result["file"] == "test_file.py"
+        assert result["has_issues"] == False
+        assert "no logic issues detected" in result["analysis"].lower()
+        
+        print("✓ Logic analysis with no issues working correctly")
+        print(f"✓ Issues detected: {result['has_issues']}")
+
+
+def test_analyze_multiple_files():
+    """Test logic analysis with multiple files"""
+    print("\nTesting logic analysis with multiple files...")
+    
+    with patch('agents.logic_agent.FreeLLMProvider', MockFreeLLMProvider), \
+         patch('agents.logic_agent.parse_code_blocks', side_effect=mock_parse_code_blocks):
+        
+        # Create agent and test state with multiple files
+        agent = LogicAgent(provider="gemini")
+        agent.llm_provider.set_response_type("complex_issues")
+        agent.llm = agent.llm_provider.get_llm("logic")
+        
+        state = create_test_state(3)  # 3 files
+        
+        # Test analysis
+        response = agent.analyze(state)
+        
+        # Verify response
+        assert response.success == True
+        assert len(response.results) == 3
+        assert len(response.errors) == 0
+        
+        # Check metadata
+        assert response.metadata["total_files"] == 3
+        assert response.metadata["analyses_completed"] == 3
+        
+        # Check each result
+        expected_files = ["test_file.py", "clean_file.py", "complex_file.py"]
+        for i, result in enumerate(response.results):
+            assert result["file"] == expected_files[i]
+            assert "analysis" in result
+            assert "suggestions" in result
+            assert "has_issues" in result
+        
+        print("✓ Multiple file analysis working correctly")
+        print(f"✓ Files analyzed: {len(response.results)}")
+
+
+def test_analyze_with_tuple_snippets():
+    """Test logic analysis with tuple code snippets"""
+    print("\nTesting logic analysis with tuple snippets...")
+    
+    with patch('agents.logic_agent.FreeLLMProvider', MockFreeLLMProvider), \
+         patch('agents.logic_agent.parse_code_blocks', side_effect=mock_parse_code_blocks):
+        
+        # Create agent
+        agent = LogicAgent(provider="gemini")
+        agent.llm_provider.set_response_type("issues_found")
+        agent.llm = agent.llm_provider.get_llm("logic")
+        
+        # Create state with tuple snippets (as mentioned in the code)
+        snippet = CodeSnippet(
+            file_path="tuple_test.py",
+            content="def test(): return True",
+            language="python"
+        )
+        
+        state = {
+            "code_snippets": [("metadata", snippet)],  # Tuple format
+            "context": create_test_state(1)["context"]
+        }
+        
+        # Test analysis
+        response = agent.analyze(state)
+        
+        # Verify response
+        assert response.success == True
+        assert len(response.results) == 1
+        assert response.results[0]["file"] == "tuple_test.py"
+        
+        print("✓ Tuple snippet analysis working correctly")
+
+
+def test_analyze_error_handling():
+    """Test error handling in logic analysis"""
+    print("\nTesting error handling in logic analysis...")
+    
+    with patch('agents.logic_agent.FreeLLMProvider', MockFreeLLMProvider), \
+         patch('agents.logic_agent.parse_code_blocks', side_effect=mock_parse_code_blocks):
+        
+        # Create agent and test state
+        agent = LogicAgent(provider="gemini")
+        agent.llm_provider.set_response_type("exception")
+        agent.llm = agent.llm_provider.get_llm("logic")
+        
+        state = create_test_state(1)
+        
+        # Test analysis with error
+        response = agent.analyze(state)
+        
+        # Verify error handling
+        assert response.success == False
+        assert len(response.errors) > 0
+        assert "Error analyzing test_file.py" in response.errors[0]
+        assert "LLM connection failed" in response.errors[0]
+        assert response.results == []
+        
+        print("✓ Error handling works correctly")
+        print(f"✓ Response success: {response.success}")
+        print(f"✓ Error message: {response.errors[0]}")
+
+
+def test_analyze_empty_code_snippet():
+    """Test analysis with empty code snippet"""
+    print("\nTesting analysis with empty code snippet...")
+    
+    with patch('agents.logic_agent.FreeLLMProvider', MockFreeLLMProvider), \
+         patch('agents.logic_agent.parse_code_blocks', side_effect=mock_parse_code_blocks):
+        
+        # Create agent
+        agent = LogicAgent(provider="gemini")
+        agent.llm_provider.set_response_type("issues_found")
+        agent.llm = agent.llm_provider.get_llm("logic")
+        
+        # Create state with empty snippet
+        empty_snippet = CodeSnippet(
+            file_path="empty_file.py",
+            content="",  # Empty content
+            language="python"
+        )
+        
+        state = {
+            "code_snippets": [empty_snippet],
+            "context": create_test_state(1)["context"]
+        }
+        
+        # Test analysis
+        response = agent.analyze(state)
+        
+        # Verify error handling for empty snippet
+        assert response.success == False
+        assert len(response.errors) > 0
+        assert "Error analyzing empty_file.py" in response.errors[0]
+        assert "Empty code snippet" in response.errors[0]
+        
+        print("✓ Empty code snippet handling works correctly")
+
+
+def test_analyze_none_snippet():
+    """Test analysis with None or malformed snippet"""
+    print("\nTesting analysis with None snippet...")
+    
+    with patch('agents.logic_agent.FreeLLMProvider', MockFreeLLMProvider):
+        # Create agent
+        agent = LogicAgent(provider="gemini")
+        agent.llm_provider.set_response_type("issues_found")
+        agent.llm = agent.llm_provider.get_llm("logic")
+        
+        # Create state with None snippet
+        state = {
+            "code_snippets": [None],
+            "context": create_test_state(1)["context"]
+        }
+        
+        # Test analysis
+        response = agent.analyze(state)
+        
+        # Verify error handling
+        assert response.success == False
+        assert len(response.errors) > 0
+        assert "Error analyzing unknown" in response.errors[0]
+        
+        print("✓ None snippet handling works correctly")
+
+
+def test_create_chain_functionality():
+    """Test the _create_chain method functionality"""
+    print("\nTesting _create_chain functionality...")
+    
+    with patch('agents.logic_agent.FreeLLMProvider') as mock_provider, \
+         patch('agents.logic_agent.parse_code_blocks', side_effect=mock_parse_code_blocks):
+        
+        # Create a mock provider instance
+        mock_llm = MockLLM("issues_found")
+        mock_provider_instance = Mock()
+        mock_provider_instance.get_llm.return_value = mock_llm
+        mock_provider.return_value = mock_provider_instance
+        
+        # Create agent
+        agent = LogicAgent(provider="gemini")
+        
+        # Test chain creation
+        chain = agent._create_chain()
+        
+        # Verify chain is created
+        assert chain is not None
+        
+        # Test chain invocation
+        test_input = {
+            "file_path": "test.py",
+            "code": "def test(): pass"
+        }
+        
+        result = chain.invoke(test_input)
+        
+        # Verify result
+        assert isinstance(result, str)
+        assert "Logic Analysis" in result
+        
+        print("✓ Chain creation and invocation works correctly")
+
+
+def test_different_providers():
+    """Test logic agent with different providers"""
+    print("\nTesting different providers...")
+    
+    providers = ["gemini", "openai", "claude"]
+    
+    for provider in providers:
+        with patch('agents.logic_agent.FreeLLMProvider') as mock_provider, \
+             patch('agents.logic_agent.parse_code_blocks', side_effect=mock_parse_code_blocks):
+            
+            mock_llm = MockLLM("issues_found")
+            mock_provider_instance = Mock()
+            mock_provider_instance.get_llm.return_value = mock_llm
+            mock_provider.return_value = mock_provider_instance
+            
+            # Create agent with different provider
+            agent = LogicAgent(provider=provider)
+            state = create_test_state(1)
+            
+            # Test analysis
+            response = agent.analyze(state)
+            
+            # Verify response
+            assert response.success == True
+            assert len(response.results) == 1
+            
+            # Verify correct provider was used
+            mock_provider.assert_called_with(provider)
+            mock_provider_instance.get_llm.assert_called_with("logic")
+    
+    print("✓ Different providers work correctly")
+
+
+def test_parse_code_blocks_integration():
+    """Test parse_code_blocks integration"""
+    print("\nTesting parse_code_blocks integration...")
+    
+    with patch('agents.logic_agent.FreeLLMProvider') as mock_provider, \
+         patch('agents.logic_agent.parse_code_blocks', side_effect=mock_parse_code_blocks):
+        
+        mock_llm = MockLLM("complex_issues")
+        mock_provider_instance = Mock()
+        mock_provider_instance.get_llm.return_value = mock_llm
+        mock_provider.return_value = mock_provider_instance
+        
+        # Create agent and test state
+        agent = LogicAgent(provider="gemini")
+        state = create_test_state(1)
+        
+        # Test analysis
+        response = agent.analyze(state)
+        
+        # Verify suggestions were parsed
+        assert response.success == True
+        result = response.results[0]
+        assert isinstance(result["suggestions"], list)
+        
+        print("✓ parse_code_blocks integration works correctly")
+
+
+def run_performance_test():
+    """Run performance test for logic analysis"""
+    print("\nRunning performance test...")
+    
+    with patch('agents.logic_agent.FreeLLMProvider') as mock_provider, \
+         patch('agents.logic_agent.parse_code_blocks', side_effect=mock_parse_code_blocks):
+        
+        mock_llm = MockLLM("issues_found")
+        mock_provider_instance = Mock()
+        mock_provider_instance.get_llm.return_value = mock_llm
+        mock_provider.return_value = mock_provider_instance
+        
+        # Create agent
+        agent = LogicAgent(provider="gemini")
+        
+        # Run multiple analyses
+        times = []
+        file_counts = [1, 2, 3]
+        
+        for i in range(15):  # 5 of each file count
+            file_count = file_counts[i % 3]
+            state = create_test_state(file_count)
+            
+            start_time = time.time()
+            response = agent.analyze(state)
+            duration = time.time() - start_time
+            times.append(duration)
+            
+            assert response.success == True
+            assert len(response.results) == file_count
+        
+        avg_time = sum(times) / len(times)
+        print(f"✓ Performance test completed")
+        print(f"✓ Average analysis time: {avg_time:.3f} seconds")
+        print(f"✓ Min time: {min(times):.3f}s, Max time: {max(times):.3f}s")
+
+
+def test_state_validation():
+    """Test analysis with various state configurations"""
+    print("\nTesting state validation...")
+    
+    with patch('agents.logic_agent.FreeLLMProvider') as mock_provider, \
+         patch('agents.logic_agent.parse_code_blocks', side_effect=mock_parse_code_blocks):
+        
+        mock_llm = MockLLM("issues_found")
+        mock_provider_instance = Mock()
+        mock_provider_instance.get_llm.return_value = mock_llm
+        mock_provider.return_value = mock_provider_instance
+        
+        agent = LogicAgent(provider="gemini")
+        
+        # Test with missing code_snippets
+        empty_state = {"context": create_test_state(1)["context"]}
+        response = agent.analyze(empty_state)
+        assert response.success == True
+        assert len(response.results) == 0
+        assert response.metadata["total_files"] == 0
+        
+        # Test with empty code_snippets list
+        empty_snippets_state = {
+            "code_snippets": [],
+            "context": create_test_state(1)["context"]
+        }
+        response = agent.analyze(empty_snippets_state)
+        assert response.success == True
+        assert len(response.results) == 0
+        assert response.metadata["total_files"] == 0
+        
+        print("✓ State validation works correctly")
+
+
+def test_complex_analysis_scenarios():
+    """Test complex analysis scenarios"""
+    print("\nTesting complex analysis scenarios...")
+    
+    with patch('agents.logic_agent.FreeLLMProvider') as mock_provider, \
+         patch('agents.logic_agent.parse_code_blocks', side_effect=mock_parse_code_blocks):
+        
+        # Test different response types
+        response_types = ["issues_found", "no_issues", "complex_issues"]
+        
+        for response_type in response_types:
+            mock_llm = MockLLM(response_type)
+            mock_provider_instance = Mock()
+            mock_provider_instance.get_llm.return_value = mock_llm
+            mock_provider.return_value = mock_provider_instance
+            
+            agent = LogicAgent(provider="gemini")
+            state = create_test_state(1)
+            
+            response = agent.analyze(state)
+            
+            assert response.success == True
+            assert len(response.results) == 1
+            
+            result = response.results[0]
+            if response_type == "no_issues":
+                assert result["has_issues"] == False
+            else:
+                assert result["has_issues"] == True
+        
+        print("✓ Complex analysis scenarios work correctly")
 
 
 def main():
+    """Run all Logic Agent tests"""
     print("=" * 60)
-    print("LOGIC AGENT UNIT TESTS")
+    print("LOGIC AGENT INDIVIDUAL TESTING")
     print("=" * 60)
-
+    
     try:
-        test_initialization()
-        test_analyze_with_issues()
-        test_analyze_no_issues()
-        test_analyze_with_exception()
-
+        # Run all tests
+        test_logic_agent_initialization()
+        test_logic_agent_initialization_with_custom_llm()
+        test_analyze_with_issues_found()
+        test_analyze_with_no_issues()
+        test_analyze_multiple_files()
+        test_analyze_with_tuple_snippets()
+        test_analyze_error_handling()
+        test_analyze_empty_code_snippet()
+        test_analyze_none_snippet()
+        test_create_chain_functionality()
+        test_different_providers()
+        test_parse_code_blocks_integration()
+        test_state_validation()
+        test_complex_analysis_scenarios()
+        run_performance_test()
+        
         print("\n" + "=" * 60)
-        print("ALL LOGIC AGENT TESTS PASSED")
+        print("ALL TESTS PASSED SUCCESSFULLY!")
         print("=" * 60)
+        
+        # Summary
+        print("\nTEST SUMMARY:")
+        print("✓ Initialization test - PASSED")
+        print("✓ Custom LLM initialization test - PASSED")
+        print("✓ Analysis with issues found test - PASSED")
+        print("✓ Analysis with no issues test - PASSED")
+        print("✓ Multiple files analysis test - PASSED")
+        print("✓ Tuple snippets analysis test - PASSED")
+        print("✓ Error handling test - PASSED")
+        print("✓ Empty code snippet test - PASSED")
+        print("✓ None snippet test - PASSED")
+        print("✓ Chain functionality test - PASSED")
+        print("✓ Different providers test - PASSED")
+        print("✓ Parse code blocks integration test - PASSED")
+        print("✓ State validation test - PASSED")
+        print("✓ Complex analysis scenarios test - PASSED")
+        print("✓ Performance test - PASSED")
+        
     except Exception as e:
-        print("\nTEST FAILED:", str(e))
+        print(f"\n TEST FAILED: {str(e)}")
         import traceback
         traceback.print_exc()
         sys.exit(1)

@@ -11,25 +11,37 @@ BACKEND_URL = os.getenv("BACKEND_URL")
 
 def check_backend_connection():
     """Check if backend is available"""
+    if not BACKEND_URL:
+        return False
     try:
         response = requests.get(f"{BACKEND_URL}/health", timeout=5)
         return response.status_code == 200
-    except:
+    except requests.exceptions.RequestException:
         return False
 
 def call_backend_api(endpoint, data=None, method="GET"):
     """Make API call to backend"""
+    if not BACKEND_URL:
+        return {"status": "error", "message": "Backend URL not configured"}
+    
     try:
         url = f"{BACKEND_URL}{endpoint}"
         if method == "GET":
             response = requests.get(url, timeout=10)
         elif method == "POST":
             response = requests.post(url, json=data, timeout=30)
+        elif method == "PUT":
+            response = requests.put(url, json=data, timeout=30)
+        elif method == "DELETE":
+            response = requests.delete(url, timeout=10)
+        else:
+            return {"status": "error", "message": f"Unsupported HTTP method: {method}"}
         
-        if response.status_code == 200:
+        # Handle both 200 (OK) and 202 (Accepted) as success
+        if response.status_code in [200, 202]:
             return {"status": "success", "data": response.json()}
         else:
-            return {"status": "error", "message": f"HTTP {response.status_code}"}
+            return {"status": "error", "message": f"HTTP {response.status_code}: {response.text}"}
     except requests.exceptions.RequestException as e:
         return {"status": "error", "message": str(e)}
     
@@ -43,9 +55,8 @@ def init_session_state():
         st.session_state.current_analysis = None
     if 'backend_url' not in st.session_state:
         st.session_state.backend_url = BACKEND_URL
-    if 'refresh_triggered' not in st.session_state:  # ✅ add this line
+    if 'refresh_triggered' not in st.session_state:
         st.session_state.refresh_triggered = False
-
 
 def apply_custom_styles():
     """Inject custom CSS styles"""
