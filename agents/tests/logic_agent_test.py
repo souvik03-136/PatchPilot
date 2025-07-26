@@ -18,6 +18,16 @@ from langchain_core.runnables.base import Runnable
 from langchain_core.runnables.utils import Input, Output
 
 
+class MockWorkflowState:
+    """Mock WorkflowState for testing"""
+    def __init__(self, context, code_snippets=None):
+        self.context = context
+        if code_snippets:
+            self.context.code_snippets = code_snippets
+        self.logic_results = []
+        self.logic_errors = []
+
+
 class MockLLM(Runnable):
     """Mock LLM for testing that implements LangChain's Runnable interface"""
     
@@ -173,20 +183,18 @@ def create_test_code_snippets():
 def create_test_state(snippet_count=1):
     """Create test state for logic analysis"""
     snippets = create_test_code_snippets()[:snippet_count]
-    return {
-        "code_snippets": snippets,
-        "context": AnalysisContext(
-            repo_name="test-logic-repo",
-            pr_id="PR-456",
-            author="john.doe",
-            commit_history=[
-                {"id": "abc123", "message": "feat: add user processing"},
-                {"id": "def456", "message": "fix: handle edge cases"}
-            ],
-            previous_issues=[],
-            code_snippets=snippets
-        )
-    }
+    context = AnalysisContext(
+        repo_name="test-logic-repo",
+        pr_id="PR-456",
+        author="john.doe",
+        commit_history=[
+            {"id": "abc123", "message": "feat: add user processing"},
+            {"id": "def456", "message": "fix: handle edge cases"}
+        ],
+        previous_issues=[],
+        code_snippets=snippets
+    )
+    return MockWorkflowState(context)
 
 
 def test_logic_agent_initialization():
@@ -239,31 +247,24 @@ def test_analyze_with_issues_found():
         
         # Test analysis
         start_time = time.time()
-        response = agent.analyze(state)
+        result_state = agent.analyze(state)
         duration = time.time() - start_time
         
         # Debug: Print what we actually got
-        print(f"DEBUG - Response success: {response.success}")
-        print(f"DEBUG - Response results count: {len(response.results)}")
-        print(f"DEBUG - Response errors: {response.errors}")
-        print(f"DEBUG - Response metadata: {response.metadata}")
+        print(f"DEBUG - Logic results count: {len(result_state.logic_results)}")
+        print(f"DEBUG - Logic errors: {result_state.logic_errors}")
         
         # Verify response
-        assert response.success == True
-        assert len(response.results) == 1
-        assert len(response.errors) == 0
+        assert len(result_state.logic_results) == 1
+        assert len(result_state.logic_errors) == 0
         
         # Check first result
-        result = response.results[0]
+        result = result_state.logic_results[0]
         assert result["file"] == "test_file.py"
         assert result["has_issues"] == True
         assert "null pointer exception" in result["analysis"].lower()
         assert "race condition" in result["analysis"].lower()
         assert isinstance(result["suggestions"], list)
-        
-        # Check metadata
-        assert response.metadata["total_files"] == 1
-        assert response.metadata["analyses_completed"] == 1
         
         print(f"✓ Logic analysis with issues completed in {duration:.3f} seconds")
         print(f"✓ Issues detected: {result['has_issues']}")
@@ -285,15 +286,14 @@ def test_analyze_with_no_issues():
         state = create_test_state(1)
         
         # Test analysis
-        response = agent.analyze(state)
+        result_state = agent.analyze(state)
         
         # Verify response
-        assert response.success == True
-        assert len(response.results) == 1
-        assert len(response.errors) == 0
+        assert len(result_state.logic_results) == 1
+        assert len(result_state.logic_errors) == 0
         
         # Check result
-        result = response.results[0]
+        result = result_state.logic_results[0]
         assert result["file"] == "test_file.py"
         assert result["has_issues"] == False
         assert "no logic issues detected" in result["analysis"].lower()
@@ -317,62 +317,22 @@ def test_analyze_multiple_files():
         state = create_test_state(3)  # 3 files
         
         # Test analysis
-        response = agent.analyze(state)
+        result_state = agent.analyze(state)
         
         # Verify response
-        assert response.success == True
-        assert len(response.results) == 3
-        assert len(response.errors) == 0
-        
-        # Check metadata
-        assert response.metadata["total_files"] == 3
-        assert response.metadata["analyses_completed"] == 3
+        assert len(result_state.logic_results) == 3
+        assert len(result_state.logic_errors) == 0
         
         # Check each result
         expected_files = ["test_file.py", "clean_file.py", "complex_file.py"]
-        for i, result in enumerate(response.results):
+        for i, result in enumerate(result_state.logic_results):
             assert result["file"] == expected_files[i]
             assert "analysis" in result
             assert "suggestions" in result
             assert "has_issues" in result
         
         print("✓ Multiple file analysis working correctly")
-        print(f"✓ Files analyzed: {len(response.results)}")
-
-
-def test_analyze_with_tuple_snippets():
-    """Test logic analysis with tuple code snippets"""
-    print("\nTesting logic analysis with tuple snippets...")
-    
-    with patch('agents.logic_agent.FreeLLMProvider', MockFreeLLMProvider), \
-         patch('agents.logic_agent.parse_code_blocks', side_effect=mock_parse_code_blocks):
-        
-        # Create agent
-        agent = LogicAgent(provider="gemini")
-        agent.llm_provider.set_response_type("issues_found")
-        agent.llm = agent.llm_provider.get_llm("logic")
-        
-        # Create state with tuple snippets (as mentioned in the code)
-        snippet = CodeSnippet(
-            file_path="tuple_test.py",
-            content="def test(): return True",
-            language="python"
-        )
-        
-        state = {
-            "code_snippets": [("metadata", snippet)],  # Tuple format
-            "context": create_test_state(1)["context"]
-        }
-        
-        # Test analysis
-        response = agent.analyze(state)
-        
-        # Verify response
-        assert response.success == True
-        assert len(response.results) == 1
-        assert response.results[0]["file"] == "tuple_test.py"
-        
-        print("✓ Tuple snippet analysis working correctly")
+        print(f"✓ Files analyzed: {len(result_state.logic_results)}")
 
 
 def test_analyze_error_handling():
@@ -390,18 +350,16 @@ def test_analyze_error_handling():
         state = create_test_state(1)
         
         # Test analysis with error
-        response = agent.analyze(state)
+        result_state = agent.analyze(state)
         
         # Verify error handling
-        assert response.success == False
-        assert len(response.errors) > 0
-        assert "Error analyzing test_file.py" in response.errors[0]
-        assert "LLM connection failed" in response.errors[0]
-        assert response.results == []
+        assert len(result_state.logic_errors) > 0
+        assert "Error analyzing test_file.py" in result_state.logic_errors[0]
+        assert "LLM connection failed" in result_state.logic_errors[0]
+        assert result_state.logic_results == []
         
         print("✓ Error handling works correctly")
-        print(f"✓ Response success: {response.success}")
-        print(f"✓ Error message: {response.errors[0]}")
+        print(f"✓ Error message: {result_state.logic_errors[0]}")
 
 
 def test_analyze_empty_code_snippet():
@@ -423,19 +381,23 @@ def test_analyze_empty_code_snippet():
             language="python"
         )
         
-        state = {
-            "code_snippets": [empty_snippet],
-            "context": create_test_state(1)["context"]
-        }
+        context = AnalysisContext(
+            repo_name="test-logic-repo",
+            pr_id="PR-456",
+            author="john.doe",
+            commit_history=[],
+            previous_issues=[],
+            code_snippets=[empty_snippet]
+        )
+        state = MockWorkflowState(context)
         
         # Test analysis
-        response = agent.analyze(state)
+        result_state = agent.analyze(state)
         
         # Verify error handling for empty snippet
-        assert response.success == False
-        assert len(response.errors) > 0
-        assert "Error analyzing empty_file.py" in response.errors[0]
-        assert "Empty code snippet" in response.errors[0]
+        assert len(result_state.logic_errors) > 0
+        assert "Error analyzing empty_file.py" in result_state.logic_errors[0]
+        assert "Empty code snippet" in result_state.logic_errors[0]
         
         print("✓ Empty code snippet handling works correctly")
 
@@ -450,19 +412,26 @@ def test_analyze_none_snippet():
         agent.llm_provider.set_response_type("issues_found")
         agent.llm = agent.llm_provider.get_llm("logic")
         
-        # Create state with None snippet
-        state = {
-            "code_snippets": [None],
-            "context": create_test_state(1)["context"]
-        }
+        # Create context with valid snippets first
+        context = AnalysisContext(
+            repo_name="test-logic-repo",
+            pr_id="PR-456",
+            author="john.doe",
+            commit_history=[],
+            previous_issues=[],
+            code_snippets=[]  # Start with empty list
+        )
+        
+        # Manually add None to the code_snippets to bypass pydantic validation
+        context.code_snippets = [None]
+        state = MockWorkflowState(context)
         
         # Test analysis
-        response = agent.analyze(state)
+        result_state = agent.analyze(state)
         
         # Verify error handling
-        assert response.success == False
-        assert len(response.errors) > 0
-        assert "Error analyzing unknown" in response.errors[0]
+        assert len(result_state.logic_errors) > 0
+        assert "Error analyzing unknown" in result_state.logic_errors[0]
         
         print("✓ None snippet handling works correctly")
 
@@ -524,11 +493,10 @@ def test_different_providers():
             state = create_test_state(1)
             
             # Test analysis
-            response = agent.analyze(state)
+            result_state = agent.analyze(state)
             
             # Verify response
-            assert response.success == True
-            assert len(response.results) == 1
+            assert len(result_state.logic_results) == 1
             
             # Verify correct provider was used
             mock_provider.assert_called_with(provider)
@@ -554,11 +522,11 @@ def test_parse_code_blocks_integration():
         state = create_test_state(1)
         
         # Test analysis
-        response = agent.analyze(state)
+        result_state = agent.analyze(state)
         
         # Verify suggestions were parsed
-        assert response.success == True
-        result = response.results[0]
+        assert len(result_state.logic_results) == 1
+        result = result_state.logic_results[0]
         assert isinstance(result["suggestions"], list)
         
         print("✓ parse_code_blocks integration works correctly")
@@ -588,12 +556,11 @@ def run_performance_test():
             state = create_test_state(file_count)
             
             start_time = time.time()
-            response = agent.analyze(state)
+            result_state = agent.analyze(state)
             duration = time.time() - start_time
             times.append(duration)
             
-            assert response.success == True
-            assert len(response.results) == file_count
+            assert len(result_state.logic_results) == file_count
         
         avg_time = sum(times) / len(times)
         print(f"✓ Performance test completed")
@@ -615,22 +582,19 @@ def test_state_validation():
         
         agent = LogicAgent(provider="gemini")
         
-        # Test with missing code_snippets
-        empty_state = {"context": create_test_state(1)["context"]}
-        response = agent.analyze(empty_state)
-        assert response.success == True
-        assert len(response.results) == 0
-        assert response.metadata["total_files"] == 0
-        
         # Test with empty code_snippets list
-        empty_snippets_state = {
-            "code_snippets": [],
-            "context": create_test_state(1)["context"]
-        }
-        response = agent.analyze(empty_snippets_state)
-        assert response.success == True
-        assert len(response.results) == 0
-        assert response.metadata["total_files"] == 0
+        context = AnalysisContext(
+            repo_name="test-logic-repo",
+            pr_id="PR-456",
+            author="john.doe",
+            commit_history=[],
+            previous_issues=[],
+            code_snippets=[]
+        )
+        empty_snippets_state = MockWorkflowState(context)
+        result_state = agent.analyze(empty_snippets_state)
+        assert len(result_state.logic_results) == 0
+        assert len(result_state.logic_errors) == 0
         
         print("✓ State validation works correctly")
 
@@ -654,12 +618,11 @@ def test_complex_analysis_scenarios():
             agent = LogicAgent(provider="gemini")
             state = create_test_state(1)
             
-            response = agent.analyze(state)
+            result_state = agent.analyze(state)
             
-            assert response.success == True
-            assert len(response.results) == 1
+            assert len(result_state.logic_results) == 1
             
-            result = response.results[0]
+            result = result_state.logic_results[0]
             if response_type == "no_issues":
                 assert result["has_issues"] == False
             else:
@@ -681,7 +644,6 @@ def main():
         test_analyze_with_issues_found()
         test_analyze_with_no_issues()
         test_analyze_multiple_files()
-        test_analyze_with_tuple_snippets()
         test_analyze_error_handling()
         test_analyze_empty_code_snippet()
         test_analyze_none_snippet()
@@ -703,7 +665,6 @@ def main():
         print("✓ Analysis with issues found test - PASSED")
         print("✓ Analysis with no issues test - PASSED")
         print("✓ Multiple files analysis test - PASSED")
-        print("✓ Tuple snippets analysis test - PASSED")
         print("✓ Error handling test - PASSED")
         print("✓ Empty code snippet test - PASSED")
         print("✓ None snippet test - PASSED")

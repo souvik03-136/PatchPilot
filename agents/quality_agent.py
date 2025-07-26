@@ -2,7 +2,7 @@ import json
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 
-from .models import QualityIssue, AgentResponse
+from .models import QualityIssue, WorkflowState
 from .tools import FreeLLMProvider
 
 
@@ -48,66 +48,59 @@ Response (JSON only):""")
     def _create_chain(self):
         return self.prompt | self.llm | self.parser
 
-    def analyze(self, state) -> AgentResponse:
-        state_dict = dict(state)
-        code_snippets = state_dict.get("code_snippets", [])
-
+    def analyze(self, state: WorkflowState) -> WorkflowState:
+        """Analyze code snippets for quality issues and update WorkflowState."""
+        context = state.context
         results = []
         errors = []
 
-        for snippet in code_snippets:
+        for snippet in context.code_snippets:
             try:
-                if isinstance(snippet, tuple):
-                    snippet = snippet[1]
-
                 chain = self._create_chain()
                 response = chain.invoke({
                     "file_path": snippet.file_path,
                     "code": snippet.content
                 })
 
-                try:
-                    clean_response = response.strip()
-                    if clean_response.startswith("```json"):
-                        clean_response = clean_response[7:]
-                    if clean_response.endswith("```"):
-                        clean_response = clean_response[:-3]
+                clean_response = response.strip()
+                if clean_response.startswith("```json"):
+                    clean_response = clean_response[7:]
+                if clean_response.endswith("```"):
+                    clean_response = clean_response[:-3]
 
+                try:
                     analysis = json.loads(clean_response.strip())
 
                     for item in analysis:
                         if isinstance(item, dict):
-                            issue = QualityIssue(
-                                type=item.get("type", "Quality Issue"),
-                                description=item.get("description", ""),
-                                line=item.get("line", 0),
-                                file=item.get("file", snippet.file_path),
-                                severity=item.get("severity", "low"),
-                                rule_id=item.get("rule_id")
+                            results.append(
+                                QualityIssue(
+                                    type=item.get("type", "Quality Issue"),
+                                    description=item.get("description", ""),
+                                    line=item.get("line", 0),
+                                    file=item.get("file", snippet.file_path),
+                                    severity=item.get("severity", "low"),
+                                    rule_id=item.get("rule_id")
+                                )
                             )
-                            results.append(issue)
 
                 except json.JSONDecodeError:
                     if any(word in response.lower() for word in ["style", "complexity", "documentation", "error"]):
-                        issue = QualityIssue(
-                            type="Code Quality Issue",
-                            description=response[:200] + "..." if len(response) > 200 else response,
-                            line=0,
-                            file=snippet.file_path,
-                            severity="low"
+                        results.append(
+                            QualityIssue(
+                                type="Code Quality Issue",
+                                description=response[:200] + "..." if len(response) > 200 else response,
+                                line=0,
+                                file=snippet.file_path,
+                                severity="low"
+                            )
                         )
-                        results.append(issue)
 
             except Exception as e:
                 file_path = getattr(snippet, "file_path", "unknown")
                 errors.append(f"Error analyzing {file_path}: {str(e)}")
 
-        return AgentResponse(
-            success=len(errors) == 0,
-            results=results,
-            errors=errors,
-            metadata={
-                "total_files": len(code_snippets),
-                "issues_found": len(results)
-            }
-        )
+        #  Update WorkflowState
+        state.quality_results = results
+        state.quality_errors = errors
+        return state

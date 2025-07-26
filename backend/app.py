@@ -9,6 +9,43 @@ import json
 import os
 from datetime import datetime, timedelta
 
+# Add these imports at the top
+import sys
+import os
+
+# Add agents directory to Python path
+agents_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "agents"))
+if agents_path not in sys.path:
+    sys.path.insert(0, agents_path)
+
+# Try to import agent system components
+AGENT_SYSTEM_AVAILABLE = False
+try:
+    # First, let's fix the import issues by temporarily changing directory context
+    original_cwd = os.getcwd()
+    agents_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "agents"))
+    
+    # Create __init__.py if it doesn't exist
+    init_file = os.path.join(agents_dir, "__init__.py")
+    if not os.path.exists(init_file):
+        with open(init_file, 'w') as f:
+            f.write("# This file makes the agents directory a Python package\n")
+    
+    # Now try imports
+    from agent_system import AgentSystem
+    from models import AnalysisContext, CodeSnippet
+    from github_integration import GitHubIntegration
+    AGENT_SYSTEM_AVAILABLE = True
+    print("Agent system successfully imported")
+    
+except ImportError as e:
+    print(f"Warning: Could not import agent system: {e}")
+    print("Running in mock mode...")
+    AgentSystem = None
+    AnalysisContext = None
+    CodeSnippet = None
+    GitHubIntegration = None
+
 app = Flask(__name__)
 CORS(app)  # Enable CORS for all routes
 
@@ -324,47 +361,129 @@ def process_analysis_task(task_id):
             
             task["status"] = "processing"
             task["started_at"] = datetime.utcnow().isoformat()
-        
-        # Simulate analysis work
-        time.sleep(5)  # Simulate processing time
-        
-        # Generate mock analysis results
-        results = {
-            "security_issues": [
-                {
-                    "type": "Hardcoded Secret",
-                    "severity": "high",
-                    "description": "API key found in source code",
-                    "line": 42,
-                    "file": "config.py"
+
+        # Check if agent system is available
+        if not AGENT_SYSTEM_AVAILABLE:
+            # Fallback to mock analysis
+            time.sleep(5)
+            results = {
+                "security_issues": [
+                    {
+                        "type": "Hardcoded Secret",
+                        "severity": "high",
+                        "description": "API key found in source code",
+                        "line": 42,
+                        "file": "config.py"
+                    }
+                ],
+                "quality_issues": [
+                    {
+                        "type": "Code Complexity",
+                        "severity": "medium",
+                        "description": "Function too long (35 lines)",
+                        "line": 15,
+                        "file": "utils.py"
+                    }
+                ],
+                "logic_issues": [
+                    {
+                        "file": "app.py",
+                        "analysis": "Potential null pointer exception",
+                        "suggestions": ["Add null check before accessing object"]
+                    }
+                ],
+                "decision": {
+                    "decision": "REQUEST_CHANGES",
+                    "risk_level": "medium",
+                    "summary": "1 security issue and 1 quality issue found",
+                    "recommendations": [
+                        "Replace hardcoded API key with environment variable",
+                        "Refactor long function into smaller units"
+                    ]
                 }
-            ],
-            "quality_issues": [
-                {
-                    "type": "Code Complexity",
-                    "severity": "medium",
-                    "description": "Function too long (35 lines)",
-                    "line": 15,
-                    "file": "utils.py"
-                }
-            ],
-            "logic_issues": [
-                {
-                    "file": "app.py",
-                    "analysis": "Potential null pointer exception",
-                    "suggestions": ["Add null check before accessing object"]
-                }
-            ],
-            "decision": {
-                "decision": "REQUEST_CHANGES",
-                "risk_level": "medium",
-                "summary": "1 security issue and 1 quality issue found",
-                "recommendations": [
-                    "Replace hardcoded API key with environment variable",
-                    "Refactor long function into smaller units"
-                ]
             }
-        }
+        else:
+            # Use real agent system
+            # Extract repo name and PR ID from URL
+            pr_url = task["pr_url"]
+            parts = pr_url.split('/')
+            repo_owner = parts[-4]
+            repo_name = parts[-3]
+            pr_id = int(parts[-1])
+            full_repo_name = f"{repo_owner}/{repo_name}"
+            
+            # Initialize GitHub integration
+            github = GitHubIntegration()
+            
+            # Get PR details
+            pr_details = github.get_pr_details(full_repo_name, pr_id)
+            if not pr_details:
+                raise Exception("Failed to get PR details")
+            
+            # Get code snippets
+            code_snippets = []
+            for file_info in pr_details['files']:
+                # Skip removed files
+                if file_info['status'] == 'removed':
+                    continue
+                    
+                content = github.get_file_content(full_repo_name, file_info['filename'], pr_details['head_sha'])
+                if content:
+                    snippet = CodeSnippet(
+                        file_path=file_info['filename'],
+                        content=content,
+                        language=file_info['filename'].split('.')[-1] if '.' in file_info['filename'] else 'unknown'
+                    )
+                    code_snippets.append(snippet)
+            
+            # Create analysis context
+            context = AnalysisContext(
+                repo_name=full_repo_name,
+                pr_id=str(pr_id),
+                author=pr_details['author'],
+                commit_history=pr_details['commits_data'],
+                previous_issues=[],
+                code_snippets=code_snippets
+            )
+            
+            # Initialize and run agent system
+            agent_system = AgentSystem()
+            
+            # Create analysis context with real data
+            context = AnalysisContext(
+                repo_name=full_repo_name,
+                pr_id=str(pr_id),
+                author=pr_details['author'],
+                commit_history=pr_details['commits_data'],
+                previous_issues=[],
+                code_snippets=code_snippets
+            )
+            
+            # Add debug logging
+            print(f"Starting analysis for PR {pr_id}")
+            print(f"Code snippets: {len(code_snippets)} files")
+            print(f"Workflow initialized: {agent_system.workflow is not None}")
+            
+            # Run analysis
+            start_time = time.time()
+            analysis_results = agent_system.analyze_pull_request(context)
+            duration = time.time() - start_time
+            
+            print(f"Analysis completed in {duration:.2f} seconds")
+            print(f"Security issues found: {len(analysis_results.get('security_issues', []))}")
+            print(f"Quality issues found: {len(analysis_results.get('quality_issues', []))}")
+            print(f"Final decision: {analysis_results.get('decision', {}).get('decision', 'UNKNOWN')}")
+            
+            # Format results for frontend
+            results = {
+                "security_issues": [issue.dict() for issue in analysis_results.get("security_issues", [])],
+                "quality_issues": [issue.dict() for issue in analysis_results.get("quality_issues", [])],
+                "logic_issues": analysis_results.get("logic_issues", []),
+                "decision": analysis_results.get("decision", {}),
+                "pr_details": pr_details,
+                "pr_analysis": analysis_results.get("pr_analysis", {}),
+                "context": analysis_results.get("context", {})
+            }
         
         with thread_lock:
             task["results"] = results

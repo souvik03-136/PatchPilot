@@ -39,6 +39,7 @@ class GitHubIntegration:
     def get_pr_details(self, repo_name: str, pr_id: int) -> Optional[Dict]:
         """Get comprehensive PR details including files, commits, and metadata"""
         try:
+            print(f"GitHub API Rate Limit: {self.rate_limit_remaining}/{self.rate_limit_reset}")
             repo = self.client.get_repo(repo_name)
             pr = repo.get_pull(pr_id)
             
@@ -126,13 +127,24 @@ class GitHubIntegration:
             return None
 
     def get_file_content(self, repo_name: str, file_path: str, ref: str = None) -> Optional[str]:
-        """Get file content from repository"""
+        """Get file content from repository with proper 404 handling"""
         try:
             repo = self.client.get_repo(repo_name)
-            file = repo.get_contents(file_path, ref=ref)
-            return file.decoded_content.decode('utf-8')
+            try:
+                file = repo.get_contents(file_path, ref=ref)
+                return file.decoded_content.decode('utf-8')
+            except GithubException as e:
+                if e.status == 404:
+                    logger.warning(f"File not found: {file_path}@{ref if ref else 'default'}")
+                    return None
+                else:
+                    logger.error(f"Error getting file content for {file_path}: {e}")
+                    return None
         except GithubException as e:
-            logger.error(f"Error getting file content: {e}")
+            logger.error(f"Error accessing repository {repo_name}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Unexpected error getting file content: {e}")
             return None
 
     def get_file_history(self, repo_name: str, file_path: str, limit: int = 10) -> List[Dict]:

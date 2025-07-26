@@ -1,7 +1,7 @@
 import json
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
-from .models import Vulnerability, AgentResponse
+from .models import Vulnerability, WorkflowState
 from .tools import FreeLLMProvider
 
 
@@ -11,7 +11,6 @@ class SecurityAgent:
         self.llm = self.llm_provider.get_llm("security")
         self.parser = StrOutputParser()
 
-        # Fixed prompt with properly escaped JSON curly braces
         self.prompt = ChatPromptTemplate.from_messages([
             ("user", """You are a security expert. Analyze this code for security vulnerabilities:
 
@@ -52,18 +51,14 @@ Response (JSON only):""")
         """Create the LangChain chain for processing."""
         return self.prompt | self.llm | self.parser
 
-    def analyze(self, state) -> AgentResponse:
-        state_dict = dict(state)
-        code_snippets = state_dict.get("code_snippets", [])
-
+    def analyze(self, state: WorkflowState) -> WorkflowState:
+        """Analyze code snippets and update the WorkflowState."""
+        context = state.context
         results = []
         errors = []
 
-        for snippet in code_snippets:
+        for snippet in context.code_snippets:
             try:
-                if isinstance(snippet, tuple):
-                    snippet = snippet[1]
-
                 chain = self._create_chain()
                 response = chain.invoke({
                     "file_path": snippet.file_path,
@@ -80,37 +75,34 @@ Response (JSON only):""")
                     analysis = json.loads(clean_response.strip())
                     for item in analysis:
                         if isinstance(item, dict):
-                            vulnerability = Vulnerability(
-                                type=item.get("type", "Unknown"),
-                                severity=item.get("severity", "medium"),
-                                description=item.get("description", ""),
-                                line=item.get("line", 0),
-                                file=item.get("file", snippet.file_path),
-                                confidence=item.get("confidence", 0.8)
+                            results.append(
+                                Vulnerability(
+                                    type=item.get("type", "Unknown"),
+                                    severity=item.get("severity", "medium"),
+                                    description=item.get("description", ""),
+                                    line=item.get("line", 0),
+                                    file=item.get("file", snippet.file_path),
+                                    confidence=item.get("confidence", 0.8)
+                                )
                             )
-                            results.append(vulnerability)
 
                 except json.JSONDecodeError:
                     if "vulnerability" in response.lower() or "security" in response.lower():
-                        results.append(Vulnerability(
-                            type="Potential Security Issue",
-                            severity="medium",
-                            description=response[:200] + "..." if len(response) > 200 else response,
-                            line=0,
-                            file=snippet.file_path,
-                            confidence=0.6
-                        ))
+                        results.append(
+                            Vulnerability(
+                                type="Potential Security Issue",
+                                severity="medium",
+                                description=response[:200] + "..." if len(response) > 200 else response,
+                                line=0,
+                                file=snippet.file_path,
+                                confidence=0.6
+                            )
+                        )
 
             except Exception as e:
                 file_path = getattr(snippet, "file_path", "unknown")
                 errors.append(f"Error analyzing {file_path}: {str(e)}")
 
-        return AgentResponse(
-            success=len(errors) == 0,
-            results=results,
-            errors=errors,
-            metadata={
-                "total_files": len(code_snippets),
-                "issues_found": len(results)
-            }
-        )
+        state.security_results = results
+        state.security_errors = errors
+        return state

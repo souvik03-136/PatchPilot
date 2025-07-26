@@ -1,5 +1,5 @@
 import json
-from .models import AnalysisContext, AgentResponse
+from .models import AnalysisContext, AgentResponse, WorkflowState
 from .tools import get_llm, hash_content
 from langchain_core.prompts import ChatPromptTemplate
 from langchain.memory import VectorStoreRetrieverMemory
@@ -42,37 +42,17 @@ Adjust severity for recurring issues and identify patterns."""),
             ("human", "Enrich context for PR: {pr_id}")
         ])
 
-    def enrich_context(self, context: AnalysisContext) -> AgentResponse:
-        try:
-            memory_key = f"{context.repo_name}:{hash_content(context.author)}"
-            history = self.memory.load_memory_variables({"prompt": memory_key})
-            commit_patterns = self._analyze_commit_history(context.commit_history)
-
-            prompt = self.prompt.format(
-                repo_name=context.repo_name,
-                pr_id=context.pr_id,
-                author=context.author,
-                previous_issues=str(context.previous_issues[:5]),
-                changed_files=", ".join([s.file_path for s in context.code_snippets]),
-                commit_patterns=commit_patterns,
-                history=history,
-            )
-
-            response = self.llm.invoke(prompt)
-            self.memory.save_context({"input": memory_key}, {"output": response})
-            self.vector_store.persist()
-
-            return AgentResponse(
-                success=True,
-                results=[response],
-                metadata={"memory_key": memory_key}
-            )
-
-        except Exception as e:
-            return AgentResponse(
-                success=False,
-                errors=[f"Context enrichment failed: {str(e)}"]
-            )
+    def enrich_context(self, state: WorkflowState) -> dict:
+        # Your context enrichment logic here
+        return {
+            "repo_analysis": {
+                "total_files": len(state.context.code_snippets),
+                "languages": list(set(s.language for s in state.context.code_snippets))
+            },
+            "historical_patterns": {
+                "similar_issues": len(state.context.previous_issues)
+            }
+        }
 
     def update_severity(self, context_key: str, issue_ids: list, severity_adjust: int):
         """Adjust issue severity based on developer feedback"""

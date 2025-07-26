@@ -1,7 +1,7 @@
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
-from .models import AgentResponse
+from .models import WorkflowState
 from .tools import get_llm, parse_code_blocks, FreeLLMProvider
 
 
@@ -62,18 +62,14 @@ Response:""")
             | self.parser
         )
 
-    def analyze(self, state) -> AgentResponse:
-        state_dict = dict(state)
-        code_snippets = state_dict.get("code_snippets", [])
-
+    def analyze(self, state: WorkflowState) -> WorkflowState:
+        """Analyze code snippets for logical issues and update WorkflowState."""
+        context = state.context
         results = []
         errors = []
 
-        for snippet in code_snippets:
+        for snippet in context.code_snippets:
             try:
-                if isinstance(snippet, tuple):
-                    snippet = snippet[1]
-
                 if not snippet or not snippet.content.strip():
                     raise ValueError("Empty code snippet")
 
@@ -96,12 +92,6 @@ Response:""")
                 file_path = getattr(snippet, "file_path", "unknown")
                 errors.append(f"Error analyzing {file_path}: {str(e)}")
 
-        return AgentResponse(
-            success=len(errors) == 0,
-            results=results,
-            errors=errors,
-            metadata={
-                "total_files": len(code_snippets),
-                "analyses_completed": len(results)
-            }
-        )
+        state.logic_results = results
+        state.logic_errors = errors
+        return state

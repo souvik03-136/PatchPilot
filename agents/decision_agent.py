@@ -1,8 +1,10 @@
 import json
-from .models import AgentResponse
-from .tools import get_llm, generate_patch
+from .models import WorkflowState
+from .tools import get_llm
 from langchain_core.prompts import ChatPromptTemplate
 
+import sys, os
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 class DecisionAgent:
     def __init__(self, provider: str = "gemini"):
@@ -27,38 +29,38 @@ Generate remediation plan:
             ("human", "Decide for PR: {pr_id}")
         ])
 
-    def make_decision(self, state: dict) -> AgentResponse:
-        try:
-            prompt = self.prompt.format(
-                pr_id=state["context"].pr_id,
-                security_issues=str(state.get("security_results", [])[:3]),
-                quality_issues=str(state.get("quality_results", [])[:3]),
-                logic_issues=str(state.get("logic_results", [])[:1]),
-                context=str(state.get("enriched_context", {}))
-            )
+    def make_decision(self, state: WorkflowState) -> WorkflowState:
+        """Update WorkflowState with the decision based on analysis results."""
+        critical_issues = [i for i in state.security_results if i.severity == "critical"]
+        high_issues = [i for i in state.security_results if i.severity == "high"]
 
-            response = self.llm.invoke(prompt)
-            decision_data = self._parse_response(response)
+        if critical_issues:
+            decision_data = {
+                "decision": "BLOCK",
+                "risk_level": "critical",
+                "summary": f"{len(critical_issues)} critical issues found"
+            }
+        elif len(high_issues) > 3:
+            decision_data = {
+                "decision": "BLOCK",
+                "risk_level": "high",
+                "summary": f"{len(high_issues)} high severity issues (>3)"
+            }
+        elif high_issues:
+            decision_data = {
+                "decision": "REQUEST_CHANGES",
+                "risk_level": "high",
+                "summary": f"{len(high_issues)} high severity issues"
+            }
+        else:
+            decision_data = {
+                "decision": "APPROVE",
+                "risk_level": "low",
+                "summary": "No critical issues found"
+            }
 
-            patches = []
-            for issue in decision_data.get("auto_fix_issues", []):
-                patch = generate_patch(issue, state["context"])
-                if patch:
-                    patches.append(patch)
-
-            return AgentResponse(
-                success=True,
-                results=[decision_data],
-                metadata={
-                    "patches": patches,  # <- Store patches in metadata instead
-                    "critical_issues": decision_data.get("critical_issues", [])
-                }
-            )
-        except Exception as e:
-            return AgentResponse(
-                success=False,
-                errors=[f"Decision failed: {str(e)}"]
-            )
+        state.decision = decision_data
+        return state
 
     def _parse_response(self, response: str) -> dict:
         """Parse LLM response into structured data."""
@@ -71,19 +73,9 @@ Generate remediation plan:
             else:
                 raise ValueError("No valid JSON found")
         except (json.JSONDecodeError, ValueError):
-            # Fallback: approximate decision based on text
             return {
                 "decision": "BLOCK" if "critical" in response.lower() else "REQUEST_CHANGES",
                 "summary": response[:200],
                 "auto_fix_issues": [],
                 "critical_issues": []
             }
-
-
-'''
-Auto-remediation support via patch generation
-Robust LLM response parsing (_parse_response)
-LLM-based decision-making (APPROVE / REQUEST_CHANGES / BLOCK)
-Metadata handling of critical issues
-Exception safety
-'''

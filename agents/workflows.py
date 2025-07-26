@@ -2,6 +2,7 @@ from langgraph.graph import StateGraph, END, START
 from .models import WorkflowState
 
 
+
 def route_based_on_severity(state: WorkflowState) -> str:
     """Route to decision making if critical issues are found, otherwise enrich context."""
     critical = any(issue.severity == "critical" for issue in state.security_results)
