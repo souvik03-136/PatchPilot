@@ -1,8 +1,9 @@
 import json
 import os
+import sys
 import signal
+import time
 from contextlib import contextmanager
-from .workflows import create_analysis_workflow
 from .models import WorkflowState, AnalysisContext
 from .security_agent import SecurityAgent
 from .quality_agent import QualityAgent
@@ -19,52 +20,97 @@ class TimeoutException(Exception):
 @contextmanager
 def time_limit(seconds):
     """Context manager to enforce a time limit on execution."""
-    def signal_handler(signum, frame):
-        raise TimeoutException("Timed out!")
-    signal.signal(signal.SIGALRM, signal_handler)
-    signal.alarm(seconds)
-    try:
+    if sys.platform == "win32":
+        # Windows fallback: manual timing
+        start = time.time()
         yield
-    finally:
-        signal.alarm(0)
+        if time.time() - start > seconds:
+            raise TimeoutException("Timed out!")
+    else:
+        def signal_handler(signum, frame):
+            raise TimeoutException("Timed out!")
+        signal.signal(signal.SIGALRM, signal_handler)
+        signal.alarm(seconds)
+        try:
+            yield
+        finally:
+            signal.alarm(0)
 
 
 class AgentSystem:
-    def __init__(self, provider: str = "gemini"):
+    def __init__(self, provider: str = "gemini", device: str = "cpu"):
         self.provider = provider
+        self.device = device
         self.agents = {
             "security": SecurityAgent(provider),
             "quality": QualityAgent(provider),
             "logic": LogicAgent(provider),
-            "context": ContextAgent(provider),
+            "context": ContextAgent(provider, device=device),
             "decision": DecisionAgent(provider)
         }
-        # Create the workflow
-        self.workflow = create_analysis_workflow(self.agents)
 
     def analyze_pull_request(self, context: AnalysisContext):
-        """Analyze a pull request with a 2-minute timeout."""
+        """Run PR analysis manually with detailed logging."""
+        print("Starting workflow analysis...")
+        print(f"Code snippets: {len(context.code_snippets)}")
+
+        state = WorkflowState(context=context)
+        print("Initial state created")
+
         try:
-            initial_state = WorkflowState(context=context)
-
-            # ✅ Add timeout (2 minutes)
             with time_limit(120):
-                final_state = self.workflow.invoke(initial_state)
+                # --- Security Agent ---
+                print("\n--- Executing Security Agent ---")
+                security_response = self.agents["security"].analyze(state)
+                state.security_results = security_response.results
+                state.security_errors = security_response.errors
+                print(f"Security issues found: {len(state.security_results)}")
 
-            results = {
-                "security_issues": final_state.security_results,
-                "quality_issues": final_state.quality_results,
-                "logic_issues": final_state.logic_results,
-                "decision": final_state.decision,
-                "context": final_state.enriched_context
-            }
+                # --- Quality Agent ---
+                print("\n--- Executing Quality Agent ---")
+                quality_response = self.agents["quality"].analyze(state)
+                state.quality_results = quality_response.results
+                state.quality_errors = quality_response.errors
+                print(f"Quality issues found: {len(state.quality_results)}")
+
+                # --- Logic Agent ---
+                print("\n--- Executing Logic Agent ---")
+                logic_response = self.agents["logic"].analyze(state)
+                state.logic_results = logic_response.results
+                state.logic_errors = logic_response.errors
+                print(f"Logic issues found: {len(state.logic_results)}")
+
+                # --- Context Agent ---
+                print("\n--- Executing Context Agent ---")
+                context_result = self.agents["context"].enrich_context(state)
+                state.enriched_context = context_result
+                print("Context enriched")
+
+                # --- Decision Agent ---
+                print("\n--- Executing Decision Agent ---")
+                decision_result = self.agents["decision"].make_decision(state)
+                state.decision = decision_result
+                print(f"Final decision: {state.decision.get('decision', 'UNKNOWN')}")
+
+                return {
+                    "security_issues": state.security_results,
+                    "quality_issues": state.quality_results,
+                    "logic_issues": state.logic_results,
+                    "decision": state.decision,
+                    "context": state.enriched_context,
+                    "errors": {
+                        "security": state.security_errors,
+                        "quality": state.quality_errors,
+                        "logic": state.logic_errors
+                    }
+                }
 
         except TimeoutException:
+            print("Workflow error: Timed out after 2 minutes")
             return {"error": "Analysis timed out after 2 minutes"}
         except Exception as e:
+            print(f"Workflow error: {str(e)}")
             return {"error": str(e)}
-
-        return results
 
     def get_agent_status(self):
         return {

@@ -1,7 +1,8 @@
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough
-from .models import WorkflowState
+
+from .models import WorkflowState, AnalysisContext, AgentResponse
 from .tools import get_llm, parse_code_blocks, FreeLLMProvider
 
 
@@ -62,36 +63,60 @@ Response:""")
             | self.parser
         )
 
-    def analyze(self, state: WorkflowState) -> WorkflowState:
-        """Analyze code snippets for logical issues and update WorkflowState."""
-        context = state.context
-        results = []
-        errors = []
+    def analyze(self, input) -> AgentResponse:
+        """Analyze code snippets for logical issues.
+        Accepts WorkflowState or AnalysisContext.
+        """
+        try:
+            # Determine context type
+            if isinstance(input, WorkflowState):
+                context = input.context
+            elif isinstance(input, AnalysisContext):
+                context = input
+            else:
+                raise ValueError("Unsupported input type for logic analysis")
 
-        for snippet in context.code_snippets:
-            try:
-                if not snippet or not snippet.content.strip():
-                    raise ValueError("Empty code snippet")
+            results = []
+            errors = []
 
-                chain = self._create_chain()
-                analysis = chain.invoke({
-                    "file_path": snippet.file_path,
-                    "code": snippet.content
-                })
+            for snippet in context.code_snippets:
+                try:
+                    if not snippet or not snippet.content.strip():
+                        raise ValueError("Empty code snippet")
 
-                code_blocks = parse_code_blocks(analysis)
+                    chain = self._create_chain()
+                    analysis = chain.invoke({
+                        "file_path": snippet.file_path,
+                        "code": snippet.content
+                    })
 
-                results.append({
-                    "file": snippet.file_path,
-                    "analysis": analysis,
-                    "suggestions": code_blocks,
-                    "has_issues": "no logic issues detected" not in analysis.lower()
-                })
+                    code_blocks = parse_code_blocks(analysis)
 
-            except Exception as e:
-                file_path = getattr(snippet, "file_path", "unknown")
-                errors.append(f"Error analyzing {file_path}: {str(e)}")
+                    results.append({
+                        "file": snippet.file_path,
+                        "analysis": analysis,
+                        "suggestions": code_blocks,
+                        "has_issues": "no logic issues detected" not in analysis.lower()
+                    })
 
-        state.logic_results = results
-        state.logic_errors = errors
-        return state
+                except Exception as e:
+                    file_path = getattr(snippet, "file_path", "unknown")
+                    errors.append(f"Error analyzing {file_path}: {str(e)}")
+
+            return AgentResponse(
+                success=(len(errors) == 0),
+                results=results,
+                errors=errors,
+                metadata={
+                    "total_files": len(context.code_snippets),
+                    "issues_found": len(results)
+                }
+            )
+
+        except Exception as e:
+            return AgentResponse(
+                success=False,
+                errors=[str(e)],
+                results=[],
+                metadata={}
+            )

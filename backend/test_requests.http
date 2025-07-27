@@ -10,56 +10,41 @@ GET {{baseUrl}}/api/metrics HTTP/1.1
 ### 3. Get Agent Status
 GET {{baseUrl}}/api/agents/status HTTP/1.1
 
-### 4. Get Repositories (should be empty initially)
-GET {{baseUrl}}/api/repositories HTTP/1.1
+### 4. AI: Get Agent Configurations
+GET {{baseUrl}}/api/agents/config HTTP/1.1
 
-### 5. Add Repository
-# @name addRepo
-POST {{baseUrl}}/api/repositories HTTP/1.1
+### 5. AI: Update Agent Configurations
+POST {{baseUrl}}/api/agents/config HTTP/1.1
 Content-Type: {{contentType}}
 
 {
-  "repo_url": "https://github.com/user/repo",
-  "webhook_secret": "secret123"
+  "security": {
+    "provider": "groq",
+    "model": "llama3-70b-8192",
+    "temperature": 0.3
+  },
+  "quality": {
+    "temperature": 0.4
+  }
 }
 
-### Save repository ID for later use
-@repoId = {{addRepo.response.body.$.id}}
-
-### 6. Delete Repository
-DELETE {{baseUrl}}/api/repositories/{{repoId}} HTTP/1.1
-
-### 7. Analyze PR
+### 6. AI: Analyze Pull Request (Real Example)
 # @name analyzePR
 POST {{baseUrl}}/api/analysis/pr HTTP/1.1
 Content-Type: {{contentType}}
 
 {
-  "pr_url": "https://github.com/user/repo/pull/1",
-  "analysis_mode": "standard"
+  "pr_url": "https://github.com/virattt/ai-hedge-fund/pull/306",
+  "analysis_mode": "deep"
 }
 
 ### Save task ID for status checks
-@taskId = {{analyzePR.response.body.$.task_id}}
+@taskId = {{analyzePR.response.body.task_id}}
 
-### 8. Get Task Status - Immediately after starting
+### 7. AI: Check Analysis Status
 GET {{baseUrl}}/api/analysis/status/{{taskId}} HTTP/1.1
 
-### Wait 3 seconds then check status again
-# Click the delay link below, then run the next request
-# 
-# Delay: https://localhost:8000/delay/3  (just a comment, not a real endpoint)
-
-### 8b. Get Task Status - After 3 seconds
-GET {{baseUrl}}/api/analysis/status/{{taskId}} HTTP/1.1
-
-### Wait 3 more seconds (total 6 seconds) then check final status
-# Delay: https://localhost:8000/delay/3  (just a comment)
-
-### 8c. Get Task Status - After 6 seconds (should be complete)
-GET {{baseUrl}}/api/analysis/status/{{taskId}} HTTP/1.1
-
-### 9. NEW: Direct Security Analysis
+### 8. AI: Direct Security Analysis (Sample Vulnerable Code)
 # @name securityAnalysis
 POST {{baseUrl}}/api/analysis/security HTTP/1.1
 Content-Type: {{contentType}}
@@ -67,63 +52,93 @@ Content-Type: {{contentType}}
 {
   "code_snippets": [
     {
-      "file_path": "app.py",
-      "content": "def login(username, password):\n    admin_pass = 'superSecret123'\n    if password == admin_pass:\n        return True\n    return False",
+      "file_path": "auth.py",
+      "content": "def login(username, password):\n    admin_pass = 'superSecret123!'\n    if password == admin_pass:\n        return True\n    return False\n\ndef get_user_data(user_id):\n    query = f\"SELECT * FROM users WHERE id = {user_id}\"\n    return execute_query(query)",
       "language": "python"
     },
     {
-      "file_path": "utils.py",
-      "content": "def process_data(data):\n    result = []\n    for item in data:\n        if item['status'] == 'active':\n            if item['value'] > 100:\n                result.append(item['value'] * 1.1)\n            else:\n                result.append(item['value'] * 0.9)\n        else:\n            result.append(None)\n    return result",
+      "file_path": "upload.py",
+      "content": "def save_uploaded_file(file):\n    filename = file.filename\n    file.save('/uploads/' + filename)\n    return filename\n\ndef process_xml(data):\n    return eval(data)",
       "language": "python"
     }
   ]
 }
 
 ### Save security analysis task ID
-@securityTaskId = {{securityAnalysis.response.body.$.task_id}}
+@securityTaskId = {{securityAnalysis.response.body.task_id}}
 
-### 10. Get Security Analysis Status
+### 9. AI: Check Security Analysis Status
 GET {{baseUrl}}/api/analysis/status/{{securityTaskId}} HTTP/1.1
 
-### 11. Get Analytics
-GET {{baseUrl}}/api/analytics?range=7d HTTP/1.1
-
-### 12. Get Agent Config
-GET {{baseUrl}}/api/agents/config HTTP/1.1
-
-### 13. Update Agent Config
-POST {{baseUrl}}/api/agents/config HTTP/1.1
+### 10. AI: Analyze Logic (Sample Complex Code)
+# @name logicAnalysis
+POST {{baseUrl}}/api/analysis/logic HTTP/1.1
 Content-Type: {{contentType}}
 
 {
-  "security": {
-    "temperature": 0.5
-  }
+  "code_snippets": [
+    {
+      "file_path": "trading.py",
+      "content": "def calculate_returns(prices):\n    returns = []\n    for i in range(1, len(prices)):\n        try:\n            returns.append((prices[i] - prices[i-1]) / prices[i-1])\n        except:\n            returns.append(0)\n    return returns\n\ndef execute_trade(signal):\n    if signal > 0.8:\n        return 'BUY'\n    elif signal < -0.8:\n        return 'SELL'\n    else:\n        return 'HOLD'",
+      "language": "python"
+    }
+  ]
 }
 
-### 14. Update GitHub Settings
+### Save logic analysis task ID
+@logicTaskId = {{logicAnalysis.response.body.task_id}}
+
+### 11. AI: Get Analytics (AI-specific metrics)
+GET {{baseUrl}}/api/analytics?range=7d HTTP/1.1
+
+### 12. Repository Management
+### Get Repositories (should be empty initially)
+GET {{baseUrl}}/api/repositories HTTP/1.1
+
+### Add Repository
+# @name addRepo
+POST {{baseUrl}}/api/repositories HTTP/1.1
+Content-Type: {{contentType}}
+
+{
+  "repo_url": "https://github.com/virattt/ai-hedge-fund",
+  "webhook_secret": "secret123"
+}
+
+### Save repository ID for later use
+@repoId = {{addRepo.response.body.id}}
+
+### Delete Repository
+DELETE {{baseUrl}}/api/repositories/{{repoId}} HTTP/1.1
+
+### 13. Settings Management
+### Update GitHub Settings
 POST {{baseUrl}}/api/settings/github HTTP/1.1
 Content-Type: {{contentType}}
 
 {
-  "token": "new_token"
+  "token": "ghp_yourtoken",
+  "webhook_secret": "yoursecret"
 }
 
-### 15. Update Notification Settings
+### Update Notification Settings
 POST {{baseUrl}}/api/settings/notifications HTTP/1.1
 Content-Type: {{contentType}}
 
 {
-  "email": "new@example.com"
+  "email": "ai-team@company.com",
+  "slack_webhook": "https://hooks.slack.com/services/..."
 }
 
-### 16. Update Security Settings
+### Update Security Settings
 POST {{baseUrl}}/api/settings/security HTTP/1.1
 Content-Type: {{contentType}}
 
 {
-  "block_critical": false
+  "block_critical": true,
+  "auto_fix_low": false,
+  "require_2fa": true
 }
 
-### 17. Verify GitHub Settings Update
+### Verify Settings
 GET {{baseUrl}}/api/settings HTTP/1.1

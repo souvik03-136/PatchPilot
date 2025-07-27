@@ -29,38 +29,40 @@ Generate remediation plan:
             ("human", "Decide for PR: {pr_id}")
         ])
 
-    def make_decision(self, state: WorkflowState) -> WorkflowState:
-        """Update WorkflowState with the decision based on analysis results."""
-        critical_issues = [i for i in state.security_results if i.severity == "critical"]
-        high_issues = [i for i in state.security_results if i.severity == "high"]
+    def make_decision(self, state: WorkflowState) -> dict:
+        """Make a decision based on security and quality analysis results."""
+        print("Making decision based on analysis results...")
 
-        if critical_issues:
-            decision_data = {
+        # Count issues by severity
+        critical = sum(1 for i in state.security_results if i.severity == "critical")
+        high = sum(1 for i in state.security_results if i.severity == "high")
+        total_issues = len(state.security_results) + len(state.quality_results)
+
+        # Decision logic
+        if critical > 0:
+            return {
                 "decision": "BLOCK",
                 "risk_level": "critical",
-                "summary": f"{len(critical_issues)} critical issues found"
+                "summary": f"{critical} critical security issues found",
+                "recommendations": ["Fix critical issues immediately"],
+                "total_issues": total_issues
             }
-        elif len(high_issues) > 3:
-            decision_data = {
-                "decision": "BLOCK",
-                "risk_level": "high",
-                "summary": f"{len(high_issues)} high severity issues (>3)"
-            }
-        elif high_issues:
-            decision_data = {
+        elif high > 0:
+            return {
                 "decision": "REQUEST_CHANGES",
                 "risk_level": "high",
-                "summary": f"{len(high_issues)} high severity issues"
+                "summary": f"{high} high severity issues found",
+                "recommendations": ["Address high severity issues"],
+                "total_issues": total_issues
             }
         else:
-            decision_data = {
+            return {
                 "decision": "APPROVE",
                 "risk_level": "low",
-                "summary": "No critical issues found"
+                "summary": "No critical issues found",
+                "recommendations": ["No action required"],
+                "total_issues": total_issues
             }
-
-        state.decision = decision_data
-        return state
 
     def _parse_response(self, response: str) -> dict:
         """Parse LLM response into structured data."""
