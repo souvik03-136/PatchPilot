@@ -38,7 +38,7 @@ def time_limit(seconds):
 
 
 class AgentSystem:
-    def __init__(self, provider: str = "gemini", device: str = "cpu"):
+    def __init__(self, provider: str = "gemini", device: str = "cpu"):  # fixed constructor typo
         self.provider = provider
         self.device = device
         self.agents = {
@@ -63,21 +63,18 @@ class AgentSystem:
                 print("\n--- Executing Security Agent ---")
                 security_response = self.agents["security"].analyze(state)
                 state.security_results = security_response.results
-                state.security_errors = security_response.errors
                 print(f"Security issues found: {len(state.security_results)}")
 
                 # --- Quality Agent ---
                 print("\n--- Executing Quality Agent ---")
                 quality_response = self.agents["quality"].analyze(state)
                 state.quality_results = quality_response.results
-                state.quality_errors = quality_response.errors
                 print(f"Quality issues found: {len(state.quality_results)}")
 
                 # --- Logic Agent ---
                 print("\n--- Executing Logic Agent ---")
                 logic_response = self.agents["logic"].analyze(state)
                 state.logic_results = logic_response.results
-                state.logic_errors = logic_response.errors
                 print(f"Logic issues found: {len(state.logic_results)}")
 
                 # --- Context Agent ---
@@ -99,9 +96,9 @@ class AgentSystem:
                     "decision": state.decision,
                     "context": state.enriched_context,
                     "errors": {
-                        "security": state.security_errors,
-                        "quality": state.quality_errors,
-                        "logic": state.logic_errors
+                        "security": security_response.errors,
+                        "quality": quality_response.errors,
+                        "logic": logic_response.errors
                     }
                 }
 
