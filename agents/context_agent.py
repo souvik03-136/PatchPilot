@@ -14,6 +14,8 @@ from langchain.memory import VectorStoreRetrieverMemory
 from langchain_chroma import Chroma
 from langchain_core.embeddings import Embeddings
 
+import chromadb
+
 # Logging setup
 logger = logging.getLogger(__name__)
 logging.basicConfig(level=logging.INFO)
@@ -67,7 +69,6 @@ class ONNXEmbeddings(Embeddings):
 
 class ContextAgent:
     def __init__(self, provider: str = "gemini", device: str = "cpu"):
-        """Initialize ContextAgent with ONNX embeddings and Chroma vector store."""
         if provider not in ["gemini", "openai", "anthropic"]:
             raise ValueError(f"Unsupported provider: {provider}")
 
@@ -77,12 +78,20 @@ class ContextAgent:
             # Initialize ONNX embeddings
             self.embedding = ONNXEmbeddings()
 
-            # Initialize Chroma vector store
+            # Create persistent directory if not exists
+            persist_dir = "memory_store"
+            os.makedirs(persist_dir, exist_ok=True)
+
+            # Initialize Chroma client with new API
+            client = chromadb.PersistentClient(path=persist_dir)
+
+            # Initialize vector store
             self.vector_store = Chroma(
+                client=client,
                 collection_name="context_memory",
                 embedding_function=self.embedding,
-                persist_directory="memory_store"
             )
+
         except Exception as e:
             raise RuntimeError(f"Failed to initialize embedding model: {str(e)}")
 
@@ -115,7 +124,6 @@ Adjust severity for recurring issues and identify patterns."""
         ])
 
     def enrich_context(self, state: WorkflowState) -> dict:
-        """Extract contextual metadata from the workflow state."""
         logger.info("Enriching context...")
         context = state.context
 
@@ -128,7 +136,6 @@ Adjust severity for recurring issues and identify patterns."""
         }
 
     def update_severity(self, context_key: str, issue_ids: list, severity_adjust: int):
-        """Update severity levels for specific issues in stored context."""
         if not issue_ids or not isinstance(issue_ids, list):
             raise ValueError("issue_ids must be a non-empty list")
 
@@ -166,7 +173,6 @@ Adjust severity for recurring issues and identify patterns."""
             raise
 
     def _analyze_commit_history(self, history: list) -> str:
-        """Analyze commit messages to extract common patterns."""
         patterns = {
             "security_fixes": sum(
                 1 for c in history
